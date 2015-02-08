@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+<title>Documents on Data Driven Davenports</title>
+<script type="application/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.3/d3.min.js"></script>
+<script>
+urls = {
+    "post": "http://localhost:5984/posts/",
+    "uuid": "http://localhost:5984/_uuids",
+    "changes": "http://localhost:5984/posts/_changes"
+}
+
+users = { // XXX Test users, this shoud probably get deleted sometime.
+    "djtestio": {
+        "nick": "DJ Testio",
+        "avatar": "/pages/davenport/prophat.jpg
+    }
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    var putit = d3.select("#putit"),
+        getit = d3.select("#getit"),
+        other = d3.select("#other");
+    putit.on('click', function() {
+        console.log(d3.event);
+        post = {
+            "post": d3.select("#post").node.value,
+        }
+        d3.xhr(urls.uuid, function(resp) {
+            post.timestamp = resp.getResponseHeader('Date');
+            var id = JSON.parse(resp.response)['uuids'][0];
+            d3.xhr(urls.post + id)
+                   .mimeType("application/json")
+                   .on('error', function(e) {console.error(e); alert("SHIT POST");})
+                   .on('load', function(resp) { 
+                        var pdata = JSON.parse(resp.response);
+                        console.log("GOOD JOB", pdata);
+                        d3.select("#response").text(resp.response);
+                        
+                    })
+                   .send('PUT', JSON.stringify(post));
+        });
+    });
+    getit.on('click', function() {
+        console.log("Getting it");
+        d3.json(urls.changes + "?include_docs=true", function(error, data) {
+            console.log("got", error, data);
+            d3.select("#posts").selectAll("div")
+                    .data(data.results, function(d) { return d && d.id; })
+                 .enter().append("div")
+                    .attr("class", "davenport")
+                    .text(function(d) { return d.doc.post;});
+        });
+    });
+    other.on("click", function() {
+        var data1 = [{"val": "A", "id": "1"},
+                    {"val": "B", "id": "2"},
+                    {"val": "C", "id": "3"}],
+            data2 = [{"val": "A", "id": "1"},
+                    {"val": "B", "id": "2"},
+                    {"val": "D", "id": "3"},
+                    {"val": "Q", "id": "4"}];
+        var setData = function(data) {
+            var dsel = d3.select("#response").selectAll('div');
+            var d = dsel.data(data, function(d) { return d.id });
+            d.style("color", "red")
+                .text(function(d) { return d.val});
+            d.enter()
+                .append("div")
+                    .attr("class", "davenport")
+                    .text(function(d) { return d.val });
+            //d.exit().remove()
+        }
+        console.log("TEST");
+        setData(data1);
+        setTimeout(function() {
+            console.log("SETTING DATA2");
+            setData(data2);
+        }, 1000);
+                
+    });
+});
+</script>
+<style type="text/css">
+body {
+    background-color: black;
+    color: cyan;
+}
+input,textarea,button {
+    background-color: black;
+    color: cyan;
+    border: 1px solid cyan;
+}
+.davenport {
+    text-shadow: blue -1pt -1pt 0;
+    font-family: monospace;
+    color: cyan;
+}
+.pre {
+    white-space: pre;
+}
+#post {
+    width: 80ex;
+    height: 25em;
+    overflow: hidden;
+}
+</style>
+</head>
+<body>
+<div class="davenport pre">
+  .-="""""""""""=-.
+  | . . . . . . . |
+  | .'.'.'.'.'.'. |
+ ()_______________()
+ ||_______________||
+  W               W
+
+--------------------
+Piss into the cloud:
+</div>
+Threadid:<input type="text" id="threadid" /><br />
+Post:<textarea class="davenport" id="post"></textarea><br />
+Parentid:<textarea class="davenport" id="parentid"></textarea><br />
+<button class="davenport" id="putit">Put it!</button>
+<button class="davenport" id="getit">Get it!</button>
+<button class="davenport" id="other">Something else</button>
+<div class="davenport" id="posts">
+</div>
+<div class="davenport pre" id="response">
+</div>
+
+</body>
+</html>

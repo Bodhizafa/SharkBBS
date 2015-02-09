@@ -26,7 +26,8 @@ putdoc() {
 
 curl -X PUT ${ROOT}/static
 curl -X PUT ${ROOT}/posts
-putpage davenport davenport.htm
+putpage davenport/index.htm davenport.htm
 putstatic davenport prophat.jpg
+putstatic davenport sharkBBS.htm
 putdoc posts/_design/thread thread.json
 

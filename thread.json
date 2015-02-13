@@ -1,7 +1,0 @@
-{
-    "language": "javascript",
-    "views":
-    {
-        "by_thread": "function(doc) { emit(doc.threadid, doc); }"
-    }
-}

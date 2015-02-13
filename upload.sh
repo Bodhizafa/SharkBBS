@@ -29,5 +29,5 @@ curl -X PUT ${ROOT}/posts
 putpage davenport/index.htm davenport.htm
 putstatic davenport prophat.jpg
 putstatic davenport sharkBBS.htm
-putdoc posts/_design/thread thread.json
+putdoc posts/_design/posts posts.json
 

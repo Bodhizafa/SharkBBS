@@ -1,7 +1,17 @@
 <!doctype html>
 <html>
 <head>
+<meta charset="utf-8" />
 <style type="text/css">
+/*
+ * ----------------------------------------------------------------------------
+ * "THE BEER-WARE LICENSE" (Revision 42):
+ * <meernik@live.com> wrote this file. As long as you retain this notice you
+ * can do whatever you want with this stuff. If we meet some day, and you think
+ * this stuff is worth it, you can buy me a beer in return 
+ * - Landon
+ * ----------------------------------------------------------------------------
+ */
 body {
     font-family: sans-serif;
     background-color: black;
@@ -53,26 +63,19 @@ input,textarea,button {
 urls = {
     "posts": "http://localhost:5984/posts/",
     "uuids": "http://localhost:5984/_uuids",
-    "changes": "http://localhost:5984/posts/_changes"
+    "changes": "http://localhost:5984/posts/_changes",
+    "thread": "http://localhost:5984/posts/_design/posts/_view/thread"
 }
 
 users = { // XXX Test users, this shoud probably get deleted sometime.
-    "djtestio": { // In real life this will be a UUID
-        "nick": "DJ Testio",
+    "djtëstio": { // In real life this will be a UUID
+        "nick": "DJ Tëstio",
         "avatar": "/pages/davenport/prophat.jpg",
         "joindate": "2015-02-08T16:20+0000"
     }
 }
 
-var user = "djtestio";
-// Gets an item off the sofa.
-var couchget = function(url, callback) {
-
-}
-
-// Creates a new item in couchdb
-var couchput = function(url, doc, callback) {
-}
+var user = "djtëstio";
 
 document.addEventListener("DOMContentLoaded", function() {
     var bump = function(postid, now) {
@@ -89,11 +92,11 @@ document.addEventListener("DOMContentLoaded", function() {
                     "creator": user,
                     "owner": user,
                     "created": now,
-                    "threadid": d3.select("#threadid").node.value,
-                    "subject": d3.select("#subject").node.value,
+                    "threadid": d3.select("#threadid").node().value,
+                    "subject": d3.select("#subject").node().value,
                     // These change every edit
                     "lasted": now,
-                    "content": d3.select("#post").node.value,
+                    "content": d3.select("#post").node().value,
                     "renderer": "pre"
                 };
             d3.xhr(urls.posts + id)
@@ -106,11 +109,22 @@ document.addEventListener("DOMContentLoaded", function() {
                     var pdata = JSON.parse(resp.response);
                     console.log("GOOD JOB", pdata);
                     d3.select("#response").text(resp.response);
-                    
-                })
+                 })
                 .send('PUT', JSON.stringify(post));
                 console.log("Attempted to post", post);
         });
+    });
+
+    d3.select("#reload").on("click", function() {
+        d3.xhr(urls.thread)
+            .on("error", function(resp) { console.error(JSON.parse(resp.response)); })
+            .on('load', function(resp) {
+                var posts = JSON.parse(resp.response)
+                console.log("GOT SOME POSTS", posts);
+            }) 
+            .send('POST', JSON.stringify({
+                "key": [d3.select("#threadid").node().value]
+            }));
     });
 });
 </script>
@@ -119,7 +133,7 @@ document.addEventListener("DOMContentLoaded", function() {
 <div id="topbar">
     <div id="you" class="miniprofile">
         <img class="avatar" src="prophat.jpg" />
-        <span class="username">DJ Testio!</span>
+        <span class="username">DJ Tëstio!</span>
     </div>
     <div id="important"></div>
     <div id="new"></div>
@@ -130,6 +144,7 @@ Post:<textarea id="post"></textarea><br />
 Parentid:<input type="text" id="parentid" /><br />
 <button class="davenport" id="reply">Reply</button>
 <button class="davenport" id="interject">Interject</button>
+<button class="davenport" id="reload">Reload</button>
 <div class="davenport" id="posts">
 </div>
 <div class="davenport pre" id="response">

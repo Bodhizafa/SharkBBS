@@ -1,0 +1,9 @@
+{
+    "language": "javascript",
+    "views":
+    {
+        "thread": {
+            "map": "function(doc) { emit([doc.threadid, doc.created]); }"
+        }
+    }
+}

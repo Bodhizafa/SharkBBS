@@ -120,7 +120,13 @@ document.addEventListener("DOMContentLoaded", function() {
             .on("error", function(resp) { console.error(JSON.parse(resp.response)); })
             .on('load', function(resp) {
                 var posts = JSON.parse(resp.response)
+                    $posts = d3.select("#posts").selectAll("div").data(posts)
                 console.log("GOT SOME POSTS", posts);
+                $posts.enter()
+                    .append(function(d) {
+                        console.log("DATUM ", d);
+                    });
+                
             }) 
             .send('POST', JSON.stringify({
                 "key": [d3.select("#threadid").node().value]

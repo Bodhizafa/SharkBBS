@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
+<script charset="utf-8" type="application/javascript" src="d3.js"></script>
 <style type="text/css">
 /*
  * ----------------------------------------------------------------------------
@@ -12,6 +13,8 @@
  * - Landon
  * ----------------------------------------------------------------------------
  */
+
+/* Overall Bullshit */
 body {
     font-family: sans-serif;
     background-color: black;
@@ -19,85 +22,171 @@ body {
     margin: 0;
 }
 input,textarea,button {
-    background-color: #011;
-    border: 1px solid #FB0;
+    background-color: #222;
+    border: 1pt solid orange;
+    color: orange;
+    border-radius: 3pt;
+}
+button {
     color: #0FF;
 }
-
-.pre {
-    white-space: pre;
+.clearer {
+    clear: both;
+    margin: 0;
+    padding: 0;
 }
 
-.username {
-    font-family: monospace;
-    font-size: 18pt;
+/* Bullshit for static elements and containers */
+#topbar {
+    padding: 2pt;
+    position: static;
+    border-bottom: 1pt solid #0FF;
+    width:100%;
+}
+.posts {
+    margin: 0 5ex 0 5ex;
 }
 
+/* Bullshit for Users and Profiles */
+.miniprofile .nick {
+    font-size: 14pt;
+    vertical-align: middle;
+    display: inline-block;
+}
 .miniprofile {
+    font-family: monospace;
     border: 1pt solid #0FF;
     border-radius: 3pt;
     display: inline-block;
 }
-
 .miniprofile .avatar {
     vertical-align: middle;
-    max-width: 18pt;
-    max-height: 18pt;
+    max-width: 48pt;
+    max-height: 48pt;
+    width: 24pt;
+    height: 24pt;
     margin: 2pt;
-    box-shadow: 0 0 2pt 0 #00F;
+    float: left;
 }
 
-.miniprofile .username {
-    vertical-align: middle;
+/* Bullshit for posts */
+.signature {
+    white-space: pre-wrap;
+    padding-left: 3pt;
+}
+.subject {
+    font-size: 13pt;
+    font-weight: bold;
+    padding: 3pt;
+}
+.post {
+    border: 1pt solid #0FF;
+    border-radius: 3pt;
+    margin: -1pt 0 0 0;
+    clear: both;
+}
+.post .header {
+    border: 1pt solid #0FF;
+    border-width: 1pt;
+    margin: -1pt -1pt 0 -1pt;
+    border-radius: 3pt;
+    border-right: 1pt solid #0FF;
+}
+.post .lasted {
+    font-size: 10pt;
+    padding-left: 4ex;
+    float: left
+}
+.post .content {
+    white-space: pre-wrap;
+    border-top-left-radius: 3pt;
+    border-left: 1pt solid #0FF;
+    border-top: 1pt solid #0FF;
+    margin-left: 5pt;
+    margin-top: -1pt;
+    padding: 3pt;
+}
+.post .footer .container {
+    display: inline;
+    float: right;
+    border-radius: 3pt;
+    border-bottom: 1pt solid #000;
+    margin: -3pt 6pt -1pt 0;
+}
+.post .footer button {
+    margin: 0 -1pt -1pt 0;
 }
 
-#topbar {
-    padding: 2pt;
-    border-bottom: 1pt solid #0FF;
-    width:100%;
+/* Bullshit overriding usual miniprofiles in posts */
+.post .miniprofile {
+    margin: -1pt 3pt -1pt -1pt;
+    float: left;
+}
+.post .avatar {
+    width: 48pt;
+    height: 48pt;
+}
+
+/* Bullshit for the post editor */
+.post textarea.content {
+    width: calc(100% - 12pt);
+    max-width: calc(100% - 12pt);
+    border-left-color: orange;
+    height: 15em;
+}
+.post input.subject {
+    display: block;
+    font-weight: normal;
+    font-size: 12pt;
 }
 </style>
 <title>Sofas all the way down</title>
-<script type="application/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.3/d3.min.js"></script>
 <script>
-urls = {
+"use strict";
+var urls = {
     "posts": "http://localhost:5984/posts/",
     "uuids": "http://localhost:5984/_uuids",
     "changes": "http://localhost:5984/posts/_changes",
-    "thread": "http://localhost:5984/posts/_design/posts/_view/thread"
+    "thread": "http://localhost:5984/posts/_design/posts/_view/thread?include_docs=true"
 }
 
-users = { // XXX Test users, this shoud probably get deleted sometime.
+var users = { // XXX Test users, this shoud probably get deleted sometime.
     "djtëstio": { // In real life this will be a UUID
         "nick": "DJ Tëstio",
-        "avatar": "/pages/davenport/prophat.jpg",
-        "joindate": "2015-02-08T16:20+0000"
+        "title": "Data Victim",
+        "avatar": "/static/davenport/prophat.jpg",
+        "signature": "When one has much to put into them, a day has a hundred pockets.\n\t-Nietzche"
     }
 }
 
-var user = "djtëstio";
 
 document.addEventListener("DOMContentLoaded", function() {
-    var bump = function(postid, now) {
-        d3.json(urls.posts + "postid", function(post) {
-            post.last_replied = now;
-        });
-    }
-    d3.select("#reply").on("click", function() {
+    var threadid  = "root", // Current global threadid being displayed
+        user = "djtëstio"; // Current logged in username (key in humans table)
+    d3.select(".reply").on("click", function() {
+        var posted = this; // Div tag with class 'post'
+        while(!d3.select(posted).classed('post') && !(posted === document)) {
+            posted = posted.parentNode;
+        }
+        if (posted === document) {
+            cosole.error("Reply button not contained in post!", this);
+            throw "Reply button not contained in post!";
+        }
+        console.log("Posted is", posted);
         d3.xhr(urls.uuids, function(resp) {
             var now = new Date(resp.getResponseHeader('Date')).toISOString(),
                 id = JSON.parse(resp.response)['uuids'][0],
                 post = {
                     // These never change after its posted
-                    "creator": user,
                     "owner": user,
                     "created": now,
-                    "threadid": d3.select("#threadid").node().value,
-                    "subject": d3.select("#subject").node().value,
+                    "threadid": threadid,
+                    "subject": posted.querySelector('.subject').value,
                     // These change every edit
                     "lasted": now,
-                    "content": d3.select("#post").node().value,
-                    "renderer": "pre"
+                    "content": posted.querySelector('.content').value,
+                    "renderer": "text",
+                    "signature": posted.querySelector('.signature').textContent
                 };
             d3.xhr(urls.posts + id)
                 .mimeType("application/json")
@@ -105,33 +194,93 @@ document.addEventListener("DOMContentLoaded", function() {
                     console.error(e); 
                     alert("SHIT POST");
                  })
-                .on('load', function(resp) { 
+                .on('load', function(resp) {
                     var pdata = JSON.parse(resp.response);
                     console.log("GOOD JOB", pdata);
-                    d3.select("#response").text(resp.response);
+                    loadThread("root")
                  })
                 .send('PUT', JSON.stringify(post));
                 console.log("Attempted to post", post);
         });
     });
-
-    d3.select("#reload").on("click", function() {
+    var loadThread = function(new_threadid) {
         d3.xhr(urls.thread)
             .on("error", function(resp) { console.error(JSON.parse(resp.response)); })
             .on('load', function(resp) {
-                var posts = JSON.parse(resp.response)
-                    $posts = d3.select("#posts").selectAll("div").data(posts)
-                console.log("GOT SOME POSTS", posts);
-                $posts.enter()
-                    .append(function(d) {
-                        console.log("DATUM ", d);
+                // Post Renderer
+                var rdata = JSON.parse(resp.response),
+                    posts = rdata.rows,
+                    $posts = d3.select("#posts").selectAll("div")
+                               .data(posts, function(d) { return d.id;}),
+                    $npost = $posts.enter()
+                        .append('div')
+                        .attr('class', 'post'),
+                    $header = $npost.append('div')
+                        .attr('class', 'header'),
+                    $miniprofile = $header.append('div')
+                        .attr('class', 'miniprofile'), 
+                    $content = $npost.append('div')
+                        .text(function(d) { return d.doc.content; })
+                        .attr('class', 'content'),
+                    $footer = $npost.append('div')
+                        .attr('class', 'footer'), 
+                    $buttoncon = null;
+                console.log("POSTS:", posts);
+                $npost.append("input")
+                    .attr("type", "hidden")
+                    .attr("class", 'id')
+                    .attr("value", function(d) { return d.doc.id })
+
+                // miniprofile -- should probably go behind a user cache
+                $miniprofile.append('img')
+                    .attr('src', function(d) { return users[d.doc.owner].avatar;})
+                    .attr('class', 'avatar')
+                $miniprofile.append('div')
+                    .attr('class', 'nick')
+                    .text(function(d) { return users[d.doc.owner].nick;})
+                $miniprofile.append('div')
+                    .attr('class', 'title')
+                    .text(function(d) { return users[d.doc.owner].title;})
+                // header
+                $header.append('div')
+                    .attr('class', 'subject')
+                    .text(function(d) { return d.doc.subject });
+                $header.append('div')
+                    .attr('class', 'lasted')
+                    .text(function(d) { return d.doc.lasted;});
+                $header.append('div')
+                    .attr('class', 'clearer')
+                // footer
+                $footer.append('div')
+                    .attr('class', 'signature')
+                    .text(function(d) { return d.doc.signature;});
+                $buttoncon = $footer.append('div')
+                        .attr('class', 'container');
+                $buttoncon.append('button')
+                    .attr('class', 'link')
+                    .text("Link");
+                $buttoncon.append('button')
+                    .attr('class', 'edit')
+                    .text("Edit");
+                $buttoncon.append('button')
+                    .attr('class', 'delete')
+                    .text("Delete")
+                    .on('click', function() {
+                        // XXX NEXT UP ON JAVASCRIPT: DELETIN' SOME POSTS. 
                     });
-                
-            }) 
+                $buttoncon.append('button')
+                    .attr('class', 'interject')
+                    .text("Interject");
+                threadid = new_threadid
+            })
             .send('POST', JSON.stringify({
-                "key": [d3.select("#threadid").node().value]
+                "key": [new_threadid]
             }));
+    }
+    d3.select("#reload").on("click", function() {
+        loadThread("root");
     });
+    loadThread("root")
 });
 </script>
 </head>
@@ -139,22 +288,34 @@ document.addEventListener("DOMContentLoaded", function() {
 <div id="topbar">
     <div id="you" class="miniprofile">
         <img class="avatar" src="prophat.jpg" />
-        <span class="username">DJ Tëstio!</span>
+        <div class="nick">DJ Tëstio!</div><br />
     </div>
     <div id="important"></div>
     <div id="new"></div>
 </div>
-Threadid:<input type="text"id="threadid" /><br />
-Subject:<input type="text" id="subject" /><br />
-Post:<textarea id="post"></textarea><br />
-Parentid:<input type="text" id="parentid" /><br />
-<button class="davenport" id="reply">Reply</button>
-<button class="davenport" id="interject">Interject</button>
-<button class="davenport" id="reload">Reload</button>
-<div class="davenport" id="posts">
+<div id="posts" class="posts">
 </div>
-<div class="davenport pre" id="response">
+<div class="posts">
+    <div class="post"> 
+        <div class="header">
+            <div class="miniprofile">
+                <img class="avatar" src="prophat.jpg" />
+                <div class="nick">DJ Tëstio!</div>
+                <div class="title">Victim</div>
+            </div>
+            <input type="text" class="subject" value="subject_name_here" />
+            <div class="lasted">Eventually now.</div>
+            <div class="clearer"></div>
+        </div>
+        <textarea style="display: block" class="content"></textarea>
+        <div class="footer">
+            <div class="signature">When one has much to put into them, a day has a hundred pockets 
+ - Nietzche </div>
+            <div class="container">
+                <button class="reply">Reply</button>
+            </div>
+        </div>
+    </div>
 </div>
-
 </body>
 </html>

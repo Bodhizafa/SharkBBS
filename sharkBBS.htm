@@ -215,7 +215,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     var pdata = JSON.parse(resp.response);
                     console.log("GOOD JOB", pdata);
                     loadThread("root")
-                    posted.querySelector('.post').value = "";
+                    posted.querySelector('.content').value = "";
                  })
                 .send('PUT', JSON.stringify(post));
                 console.log("Attempted to post", post);

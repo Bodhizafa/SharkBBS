@@ -23,7 +23,7 @@ body {
 }
 input,textarea,button {
     background-color: #222;
-    border: 1pt solid orange;
+    border: 1pt solid orange; /* Good things are measured in points */
     color: orange;
     border-radius: 3pt;
 }
@@ -45,6 +45,10 @@ button {
 }
 .posts {
     margin: 0 5ex 0 5ex;
+}
+#posted {
+    padding-top: 14pt;
+    padding-bottom: 5em;
 }
 
 /* Bullshit for Users and Profiles */
@@ -72,7 +76,8 @@ button {
 /* Bullshit for posts */
 .signature {
     white-space: pre-wrap;
-    padding-left: 3pt;
+    padding: 6pt 3pt 6pt 3pt;
+    font-size: 10pt;
 }
 .subject {
     font-size: 13pt;
@@ -82,7 +87,7 @@ button {
 .post {
     border: 1pt solid #0FF;
     border-radius: 3pt;
-    margin: -1pt 0 0 0;
+    margin: 14pt 0 0 0;
     clear: both;
 }
 .post .header {
@@ -100,18 +105,21 @@ button {
 .post .content {
     white-space: pre-wrap;
     border-top-left-radius: 3pt;
-    border-left: 1pt solid #0FF;
-    border-top: 1pt solid #0FF;
-    margin-left: 5pt;
-    margin-top: -1pt;
+    border-top-right-radius: 3pt;
+    border: 1pt solid #0FF;
+    border-bottom: 0;
+    margin: 2pt -1pt 0 5pt;
     padding: 3pt;
+}
+.post .footer {
+    margin-top: -1pt;
 }
 .post .footer .container {
     display: inline;
     float: right;
     border-radius: 3pt;
     border-bottom: 1pt solid #000;
-    margin: -3pt 6pt -1pt 0;
+    margin: -11pt 6pt -1pt 0;
 }
 .post .footer button {
     margin: 0 -1pt -1pt 0;
@@ -123,18 +131,19 @@ button {
     float: left;
 }
 .post .avatar {
-    width: 48pt;
-    height: 48pt;
+    width: 32pt;
+    height: 32pt;
 }
 
 /* Bullshit for the post editor */
 .post textarea.content {
     width: calc(100% - 12pt);
     max-width: calc(100% - 12pt);
-    border-left-color: orange;
+    border: 1pt solid orange;
     height: 15em;
 }
 .post input.subject {
+    width: 25ex;
     display: block;
     font-weight: normal;
     font-size: 12pt;
@@ -159,19 +168,25 @@ var users = { // XXX Test users, this shoud probably get deleted sometime.
     }
 }
 
-
+if (Element.prototype.closest === undefined) {
+    console.log("Registering closest");
+    Element.prototype.closest = function(sel) {
+        var cur = this.parentNode;
+        while(cur !== document && !cur.matches(sel)) {
+            cur = cur.parentNode;
+        }
+        if (cur === document) {
+            return null;
+        } else {
+            return cur;
+        }
+    }
+}
 document.addEventListener("DOMContentLoaded", function() {
     var threadid  = "root", // Current global threadid being displayed
         user = "djtëstio"; // Current logged in username (key in humans table)
     d3.select(".reply").on("click", function() {
-        var posted = this; // Div tag with class 'post'
-        while(!d3.select(posted).classed('post') && !(posted === document)) {
-            posted = posted.parentNode;
-        }
-        if (posted === document) {
-            cosole.error("Reply button not contained in post!", this);
-            throw "Reply button not contained in post!";
-        }
+        var posted = this.closest('.post');
         console.log("Posted is", posted);
         d3.xhr(urls.uuids, function(resp) {
             var now = new Date(resp.getResponseHeader('Date')).toISOString(),
@@ -198,6 +213,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     var pdata = JSON.parse(resp.response);
                     console.log("GOOD JOB", pdata);
                     loadThread("root")
+                    posted.querySelector('.post').value = "";
                  })
                 .send('PUT', JSON.stringify(post));
                 console.log("Attempted to post", post);
@@ -210,7 +226,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 // Post Renderer
                 var rdata = JSON.parse(resp.response),
                     posts = rdata.rows,
-                    $posts = d3.select("#posts").selectAll("div")
+                    $posts = d3.select("#posts").selectAll("div.post")
                                .data(posts, function(d) { return d.id;}),
                     $npost = $posts.enter()
                         .append('div')
@@ -221,26 +237,33 @@ document.addEventListener("DOMContentLoaded", function() {
                         .attr('class', 'miniprofile'), 
                     $content = $npost.append('div')
                         .text(function(d) { return d.doc.content; })
-                        .attr('class', 'content'),
+                        .attr('class', 'content')
+                        .style('display', function(d) {
+                            return d.doc.content ? "unset" : "none";
+                        }),
                     $footer = $npost.append('div')
                         .attr('class', 'footer'), 
                     $buttoncon = null;
                 console.log("POSTS:", posts);
-                $npost.append("input")
+                $posts.exit().remove();
+                $header.append("input")
                     .attr("type", "hidden")
                     .attr("class", 'id')
-                    .attr("value", function(d) { return d.doc.id })
-
+                    .attr("value", function(d) { return d.id })
+                $header.append("input")
+                    .attr("type", "hidden")
+                    .attr("class", 'rev')
+                    .attr("value", function(d) { return d.doc._rev });
                 // miniprofile -- should probably go behind a user cache
                 $miniprofile.append('img')
                     .attr('src', function(d) { return users[d.doc.owner].avatar;})
-                    .attr('class', 'avatar')
+                    .attr('class', 'avatar');
                 $miniprofile.append('div')
                     .attr('class', 'nick')
-                    .text(function(d) { return users[d.doc.owner].nick;})
+                    .text(function(d) { return users[d.doc.owner].nick;});
                 $miniprofile.append('div')
                     .attr('class', 'title')
-                    .text(function(d) { return users[d.doc.owner].title;})
+                    .text(function(d) { return users[d.doc.owner].title;});
                 // header
                 $header.append('div')
                     .attr('class', 'subject')
@@ -253,12 +276,18 @@ document.addEventListener("DOMContentLoaded", function() {
                 // footer
                 $footer.append('div')
                     .attr('class', 'signature')
-                    .text(function(d) { return d.doc.signature;});
+                    .text(function(d) { return d.doc.signature;})
+                    .style('display', function(d) {
+                        return d.doc.content ? "unset" : "none";
+                    }),
                 $buttoncon = $footer.append('div')
                         .attr('class', 'container');
                 $buttoncon.append('button')
                     .attr('class', 'link')
-                    .text("Link");
+                    .text("Link")
+                    .style('display', function(d) {
+                        return d.doc.content ? "unset" : "none";
+                    });
                 $buttoncon.append('button')
                     .attr('class', 'edit')
                     .text("Edit");
@@ -266,7 +295,18 @@ document.addEventListener("DOMContentLoaded", function() {
                     .attr('class', 'delete')
                     .text("Delete")
                     .on('click', function() {
-                        // XXX NEXT UP ON JAVASCRIPT: DELETIN' SOME POSTS. 
+                        var id = this.closest('.post').querySelector('.id').value,
+                            rev = this.closest('.post').querySelector('.rev').value;
+                        console.log(id);
+                        d3.xhr(urls.posts + id + "?rev=" + rev)
+                        .on('error', function(e) {
+                            console.error(e); 
+                            alert("SHIT POST");
+                         })
+                        .on('load', function(e) {
+                            loadThread("root")
+                        })
+                        .send('DELETE');
                     });
                 $buttoncon.append('button')
                     .attr('class', 'interject')
@@ -295,7 +335,7 @@ document.addEventListener("DOMContentLoaded", function() {
 </div>
 <div id="posts" class="posts">
 </div>
-<div class="posts">
+<div class="posts" id="posted">
     <div class="post"> 
         <div class="header">
             <div class="miniprofile">

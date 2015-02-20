@@ -188,6 +188,7 @@ document.addEventListener("DOMContentLoaded", function() {
     d3.select(".reply").on("click", function() {
         var posted = this.closest('.post');
         console.log("Posted is", posted);
+        // Get a uuid
         d3.xhr(urls.uuids, function(resp) {
             var now = new Date(resp.getResponseHeader('Date')).toISOString(),
                 id = JSON.parse(resp.response)['uuids'][0],
@@ -203,6 +204,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     "renderer": "text",
                     "signature": posted.querySelector('.signature').textContent
                 };
+            // Post the post
             d3.xhr(urls.posts + id)
                 .mimeType("application/json")
                 .on('error', function(e) {

@@ -158,7 +158,6 @@ var urls = {
     "changes": "http://localhost:5984/posts/_changes",
     "thread": "http://localhost:5984/posts/_design/posts/_view/thread?include_docs=true"
 }
-
 var users = { // XXX Test users, this shoud probably get deleted sometime.
     "djtëstio": { // In real life this will be a UUID
         "nick": "DJ Tëstio",
@@ -167,7 +166,7 @@ var users = { // XXX Test users, this shoud probably get deleted sometime.
         "signature": "When one has much to put into them, a day has a hundred pockets.\n\t-Nietzche"
     }
 }
-
+// My version of chromium doesn't have this
 if (Element.prototype.closest === undefined) {
     console.log("Registering closest");
     Element.prototype.closest = function(sel) {
@@ -182,9 +181,28 @@ if (Element.prototype.closest === undefined) {
         }
     }
 }
+
 document.addEventListener("DOMContentLoaded", function() {
     var threadid  = "root", // Current global threadid being displayed
         user = "djtëstio"; // Current logged in username (key in humans table)
+    // Given an element which is a post, return the psot JSON object
+    var getPost = function(posted, now) { 
+        var subject = posted.querySelector('.subject'),
+            content = posted.querySelector('.content'),
+            signature = posted.querySelector('.signature'),
+            post = { 
+                "owner": user,
+                "threadid": threadid,
+                "subject": subject.value || subject.textContent,
+                "content": content.value || content.textContent,
+                "renderer": "text",
+                "signature": signature.value || signature.textContent
+            };
+            if (now) {
+                post.lasted = now;
+            }
+            return post;
+    };
     d3.select(".reply").on("click", function() {
         var posted = this.closest('.post');
         console.log("Posted is", posted);
@@ -192,19 +210,8 @@ document.addEventListener("DOMContentLoaded", function() {
         d3.xhr(urls.uuids, function(resp) {
             var now = new Date(resp.getResponseHeader('Date')).toISOString(),
                 id = JSON.parse(resp.response)['uuids'][0],
-                post = {
-                    // These never change after its posted
-                    "owner": user,
-                    "created": now,
-                    "threadid": threadid,
-                    "subject": posted.querySelector('.subject').value,
-                    // These change every edit
-                    "lasted": now,
-                    "content": posted.querySelector('.content').value,
-                    "renderer": "text",
-                    "signature": posted.querySelector('.signature').textContent
-                };
-            // Post the post
+                post = getPost(posted, now);            // Post the post
+            post.created = now;
             d3.xhr(urls.posts + id)
                 .mimeType("application/json")
                 .on('error', function(e) {
@@ -214,13 +221,14 @@ document.addEventListener("DOMContentLoaded", function() {
                 .on('load', function(resp) {
                     var pdata = JSON.parse(resp.response);
                     console.log("GOOD JOB", pdata);
-                    loadThread("root")
+                    loadThread("root");
                     posted.querySelector('.content').value = "";
                  })
                 .send('PUT', JSON.stringify(post));
                 console.log("Attempted to post", post);
         });
     });
+    // Load new_threadid, replacing basically everything
     var loadThread = function(new_threadid) {
         d3.xhr(urls.thread)
             .on("error", function(resp) { console.error(JSON.parse(resp.response)); })
@@ -245,9 +253,9 @@ document.addEventListener("DOMContentLoaded", function() {
                         }),
                     $footer = $npost.append('div')
                         .attr('class', 'footer'), 
-                    $buttoncon = null;
+                    $buttoncon, $edit, $delete, $interject;
                 console.log("POSTS:", posts);
-                $posts.exit().remove();
+                $posts.exit().remove(); // XXX NEXT UP ON JAVASCRIPT - TRANSITION FWOOSH TO LEFT
                 $header.append("input")
                     .attr("type", "hidden")
                     .attr("class", 'id')
@@ -284,15 +292,37 @@ document.addEventListener("DOMContentLoaded", function() {
                     }),
                 $buttoncon = $footer.append('div')
                         .attr('class', 'container');
-                $buttoncon.append('button')
+                $buttoncon.append('button') // XXX NEXT UP ON JAVASCRIPT, MAKE LINK WORK
                     .attr('class', 'link')
                     .text("Link")
                     .style('display', function(d) {
                         return d.doc.content ? "unset" : "none";
                     });
-                $buttoncon.append('button')
+                $edit = $buttoncon.append('button')
                     .attr('class', 'edit')
-                    .text("Edit");
+                    .text("Edit")
+                    .on('click', function editclick() { 
+                        var posted = this.closest('.post'),
+                            post = getPost(posted), 
+                            hidden = d3.select(this).selectAll('.delete,.interject').style('display', 'none')
+                        d3.select(this).text("Save");
+                        if (posted.querySelector('.content').textContent) {
+                            posted.querySelector('.content')
+                                .outerHTML = '<textarea class="content">' + post.content + '</textarea>';
+                        }
+                        posted.querySelector('.subject')
+                            .outerHTML = '<input class="subject" value="' + post.subject + '" />';
+                        d3.select(this).on('click', function() { 
+                            var post = getPost(posted); // XXX NO DATE
+                            loadThread("root");
+                            // XXX DOES THIS SHIT STILL EXST WHEN WE LOAD THREAD?
+                            d3.select(this).on('click', function() {
+                                d3.select(this).text('Edit');
+                                hidden.style('display', 'initial')
+                                editclick.apply(this);
+                            });
+                        });
+                    }); // XXX NEXT UP ON JAVASCRIPT: MAKE EDIT WORK
                 $buttoncon.append('button')
                     .attr('class', 'delete')
                     .text("Delete")

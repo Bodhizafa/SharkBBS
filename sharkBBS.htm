@@ -153,13 +153,14 @@ button {
 <script>
 "use strict";
 var urls = {
-    "posts": "http://localhost:5984/posts/",
+    "posts": "http://localhost:5984/posts",
     "uuids": "http://localhost:5984/_uuids",
     "changes": "http://localhost:5984/posts/_changes",
-    "thread": "http://localhost:5984/posts/_design/posts/_view/thread?include_docs=true"
+    "thread": "http://localhost:5984/posts/_design/posts/_view/thread?include_docs=true",
+    "post": "http://localhost:5984/posts/_design/posts/_update/post",
 }
 var users = { // XXX Test users, this shoud probably get deleted sometime.
-    "djtëstio": { // In real life this will be a UUID
+    "djtëstio": { // In real life this will be a UUID ... No it won't
         "nick": "DJ Tëstio",
         "title": "Data Victim",
         "avatar": "/static/davenport/prophat.jpg",
@@ -212,7 +213,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 id = JSON.parse(resp.response)['uuids'][0],
                 post = getPost(posted, now);            // Post the post
             post.created = now;
-            d3.xhr(urls.posts + id)
+            d3.xhr(urls.posts + '/' + id)
                 .mimeType("application/json")
                 .on('error', function(e) {
                     console.error(e); 
@@ -304,7 +305,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     .on('click', function editclick() { 
                         var posted = this.closest('.post'),
                             post = getPost(posted), 
-                            hidden = d3.select(this).selectAll('.delete,.interject').style('display', 'none')
+                            hidden = d3.select(this).selectAll('.delete,.interject').style('display', 'none');
                         d3.select(this).text("Save");
                         if (posted.querySelector('.content').textContent) {
                             posted.querySelector('.content')
@@ -313,14 +314,33 @@ document.addEventListener("DOMContentLoaded", function() {
                         posted.querySelector('.subject')
                             .outerHTML = '<input class="subject" value="' + post.subject + '" />';
                         d3.select(this).on('click', function() { 
-                            var post = getPost(posted); // XXX NO DATE
-                            loadThread("root");
-                            // XXX DOES THIS SHIT STILL EXST WHEN WE LOAD THREAD?
-                            d3.select(this).on('click', function() {
-                                d3.select(this).text('Edit');
-                                hidden.style('display', 'initial')
-                                editclick.apply(this);
-                            });
+                            var post = getPost(posted, new Date().toISOString()), // XXX NO DATE
+                                rev = posted.querySelector('.rev').value,
+                                id = posted.querySelector('.id').value,
+                                that = this;
+                            console.log("Saving..");
+                            d3.xhr(urls.post + '/' + id + "?rev=" + rev)
+                                .mimeType("application/json")
+                                .on('error', function(e) {
+                                    console.error(e); 
+                                    alert("SHIT POST");
+                                 })
+                                .on('load', function(resp) {
+                                    console.log("GOOD JOB", resp);
+                                    d3.select(this).text('Edit');
+                                    hidden.style('display', 'initial');
+                                    // XXX WELL THAT DIDN'T WORK
+                                    posted.querySelector('.subject')
+                                        .outerHTML = '<div class="subject></div>';
+                                    posted.querySelector('.content')
+                                        .outerHTML = '<div class="content"></div>';
+                                    loadThread("root");
+                                    // XXX DOES THIS SHIT STILL EXST WHEN WE LOAD THREAD? Yeah, it does.
+                                    d3.select(that).on('click', function() {
+                                        editclick.apply(this);
+                                    });
+                                 })
+                                .send('PUT', JSON.stringify(post));
                         });
                     }); // XXX NEXT UP ON JAVASCRIPT: MAKE EDIT WORK
                 $buttoncon.append('button')

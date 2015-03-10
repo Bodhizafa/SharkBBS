@@ -26,7 +26,7 @@ function (newDoc, oldDoc, userCtx, secObj) {
         "post": "
 function (doc, req) {
     var now = new Date().toISOString(),
-        newDoc = req.form;
+        newDoc = JSON.parse(req.body);
     if (!doc) {
         if (req.id !== undefined) {
             newDoc._id = req.id;
@@ -39,6 +39,7 @@ function (doc, req) {
     } else {
         log('EDIT THE DOCUMENTSING');
         log(newDoc);
+        log(req);
         doc._id = doc._id || req.uuid;
         if (req.query.rev !== doc._rev) {
             throw {conflict: 'MVCC conflict'};

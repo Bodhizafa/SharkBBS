@@ -27,6 +27,7 @@ function (newDoc, oldDoc, userCtx, secObj) {
 function (doc, req) {
     var now = new Date().toISOString(),
         newDoc = JSON.parse(req.body);
+SPADOW.Adwlkj,adwkjaf;;a?!"@:[
     if (!doc) {
         if (req.id !== undefined) {
             newDoc._id = req.id;

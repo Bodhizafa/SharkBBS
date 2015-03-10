@@ -38,6 +38,7 @@ function (doc, req) {
         return [newDoc, 'Posted'];
     } else {
         log('EDIT THE DOCUMENTSING');
+        log(newDoc);
         doc._id = doc._id || req.uuid;
         if (req.query.rev !== doc._rev) {
             throw {conflict: 'MVCC conflict'};

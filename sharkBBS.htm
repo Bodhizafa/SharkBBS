@@ -104,6 +104,7 @@ button {
 }
 .post .content {
     white-space: pre-wrap;
+    color: #FFF;
     border-top-left-radius: 3pt;
     border-top-right-radius: 3pt;
     border: 1pt solid #0FF;
@@ -254,18 +255,32 @@ document.addEventListener("DOMContentLoaded", function() {
                         }),
                     $footer = $npost.append('div')
                         .attr('class', 'footer'), 
-                    $buttoncon, $edit, $delete, $interject;
+                    $buttoncon, $edit
                 console.log("POSTS:", posts);
+                // Delete posts that no longer exist
                 $posts.exit().remove(); // XXX NEXT UP ON JAVASCRIPT - TRANSITION FWOOSH TO LEFT
+                // Update an existing post
+                $posts.select('.rev')
+                    .attr("value", function(d) { return d.doc._rev; });
+                $posts.select('.subject')
+                    .text(function(d) { return d.doc.subject; });
+                $posts.select('.lasted')
+                    .text(function(d) { return d.doc.lasted; });
+                $posts.select('.content')
+                    .text(function(d) { return d.doc.content; });
+                $posts.select('.signature')
+                    .text(function(d) { return d.doc.signature; });
+                // Create a new post
                 $header.append("input")
                     .attr("type", "hidden")
                     .attr("class", 'id')
-                    .attr("value", function(d) { return d.id })
+                    .attr("value", function(d) { return d.id });
                 $header.append("input")
                     .attr("type", "hidden")
                     .attr("class", 'rev')
                     .attr("value", function(d) { return d.doc._rev });
                 // miniprofile -- should probably go behind a user cache
+                // XXX Not updated
                 $miniprofile.append('img')
                     .attr('src', function(d) { return users[d.doc.owner].avatar;})
                     .attr('class', 'avatar');
@@ -283,14 +298,14 @@ document.addEventListener("DOMContentLoaded", function() {
                     .attr('class', 'lasted')
                     .text(function(d) { return d.doc.lasted;});
                 $header.append('div')
-                    .attr('class', 'clearer')
+                    .attr('class', 'clearer');
                 // footer
                 $footer.append('div')
                     .attr('class', 'signature')
                     .text(function(d) { return d.doc.signature;})
                     .style('display', function(d) {
                         return d.doc.content ? "unset" : "none";
-                    }),
+                    });
                 $buttoncon = $footer.append('div')
                         .attr('class', 'container');
                 $buttoncon.append('button') // XXX NEXT UP ON JAVASCRIPT, MAKE LINK WORK
@@ -303,21 +318,24 @@ document.addEventListener("DOMContentLoaded", function() {
                     .attr('class', 'edit')
                     .text("Edit")
                     .on('click', function editclick() { 
+                        // Clicked "edit"
                         var posted = this.closest('.post'),
-                            post = getPost(posted), 
-                            hidden = d3.select(this).selectAll('.delete,.interject').style('display', 'none');
-                        d3.select(this).text("Save");
+                            post = getPost(posted),
+                            hidden_sel = '.delete,.interject',
+                            that = this;
+                        d3.select(that).selectAll(hidden_sel).style('display', 'none');
+                        d3.select(that).text("Save");
                         if (posted.querySelector('.content').textContent) {
                             posted.querySelector('.content')
                                 .outerHTML = '<textarea class="content">' + post.content + '</textarea>';
                         }
                         posted.querySelector('.subject')
                             .outerHTML = '<input class="subject" value="' + post.subject + '" />';
-                        d3.select(this).on('click', function() { 
+                        d3.select(that).on('click', function() { 
+                            // Clicked "save"
                             var post = getPost(posted, new Date().toISOString()), // XXX NO DATE
                                 rev = posted.querySelector('.rev').value,
-                                id = posted.querySelector('.id').value,
-                                that = this;
+                                id = posted.querySelector('.id').value;
                             console.log("Saving..");
                             d3.xhr(urls.post + '/' + id + "?rev=" + rev)
                                 .mimeType("application/json")
@@ -326,19 +344,16 @@ document.addEventListener("DOMContentLoaded", function() {
                                     alert("SHIT POST");
                                  })
                                 .on('load', function(resp) {
+                                    // Post has been saved, unhide buttons, 
                                     console.log("GOOD JOB", resp);
-                                    d3.select(this).text('Edit');
-                                    hidden.style('display', 'initial');
-                                    // XXX WELL THAT DIDN'T WORK
+                                    d3.select(that).text('Edit');
+                                    d3.select(that).selectAll(hidden_sel).style('display', 'initial');
                                     posted.querySelector('.subject')
-                                        .outerHTML = '<div class="subject></div>';
+                                        .outerHTML = '<div class="subject"></div>';
                                     posted.querySelector('.content')
                                         .outerHTML = '<div class="content"></div>';
+                                    d3.select(that).on('click', editclick);
                                     loadThread("root");
-                                    // XXX DOES THIS SHIT STILL EXST WHEN WE LOAD THREAD? Yeah, it does.
-                                    d3.select(that).on('click', function() {
-                                        editclick.apply(this);
-                                    });
                                  })
                                 .send('PUT', JSON.stringify(post));
                         });
@@ -363,7 +378,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 $buttoncon.append('button')
                     .attr('class', 'interject')
                     .text("Interject");
-                threadid = new_threadid
+                threadid = new_threadid;
             })
             .send('POST', JSON.stringify({
                 "key": [new_threadid]

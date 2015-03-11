@@ -357,7 +357,7 @@ document.addEventListener("DOMContentLoaded", function() {
                                  })
                                 .send('PUT', JSON.stringify(post));
                         });
-                    }); // XXX NEXT UP ON JAVASCRIPT: MAKE EDIT WORK
+                    }); 
                 $buttoncon.append('button')
                     .attr('class', 'delete')
                     .text("Delete")
@@ -365,7 +365,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         var id = this.closest('.post').querySelector('.id').value,
                             rev = this.closest('.post').querySelector('.rev').value;
                         console.log(id);
-                        d3.xhr(urls.posts + id + "?rev=" + rev)
+                        d3.xhr(urls.posts + '/' + id + "?rev=" + rev)
                         .on('error', function(e) {
                             console.error(e); 
                             alert("SHIT POST");
@@ -375,7 +375,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         })
                         .send('DELETE');
                     });
-                $buttoncon.append('button')
+                $buttoncon.append('button') // NEXT UP ON JAVASCRIPT: MAKE INTERJECT WORK
                     .attr('class', 'interject')
                     .text("Interject");
                 threadid = new_threadid;

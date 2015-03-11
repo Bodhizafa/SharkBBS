@@ -3,6 +3,13 @@
     "validate_doc_update": "
 function (newDoc, oldDoc, userCtx, secObj) {
     var required_keys = ['owner', 'renderer', 'content', 'lasted', 'created', 'subject', 'threadid', 'signature'];
+    log('UPDATE VALIDATIN');
+    log(oldDoc);
+    log('->');
+    log(newDoc);
+    if(newDoc._deleted) {
+        return true;
+    }
     if (oldDoc !== null) {
         if (newDoc.created !== oldDoc.created) {
             throw {forbidden: 'Attempted to change post created'};
@@ -27,7 +34,6 @@ function (newDoc, oldDoc, userCtx, secObj) {
 function (doc, req) {
     var now = new Date().toISOString(),
         newDoc = JSON.parse(req.body);
-SPADOW.Adwlkj,adwkjaf;;a?!"@:[
     if (!doc) {
         if (req.id !== undefined) {
             newDoc._id = req.id;

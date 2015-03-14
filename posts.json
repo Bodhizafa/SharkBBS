@@ -10,6 +10,9 @@ function (newDoc, oldDoc, userCtx, secObj) {
     if(newDoc._deleted) {
         return true;
     }
+    if (newDoc.threadid === 'PRISMO') {
+        throw "Hey. What the fuck are you doing here?";
+    }
     if (oldDoc !== null) {
         if (newDoc.created !== oldDoc.created) {
             throw {forbidden: 'Attempted to change post created'};
@@ -68,7 +71,7 @@ function (doc, req) {
     "views":
     {
         "thread": {
-            "map": "function(doc) { emit([doc.threadid, doc.created]); }"
+            "map": "function(doc) { emit(doc.threadid, null); }"
         }
     }
 }

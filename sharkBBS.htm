@@ -155,35 +155,32 @@ button {
 "use strict";
 // Model - Literally a picture of how data is literally shaped on the backend
 /* 
-At the base of everything is a post with the key 'root.' That key has threadid 'PRISMO.' 
-You cannot navigate up to prismo.
+threadid is the id of the thread you would be replying to if you hit 'reply'
 
-Let me interject for a moment...
-Interjecting adds a post with the same threadid is the post being interjected upon, but with parentid set to the id of the post it is interjecting on.
-Consequently, interjecting on an interjection is equivalent to interjecting on the post it was interjecting on.
+|-  means: threadid points to ID of post in the column where | is.
+|-- means: '' and also this is an interjection on the |-'d post closest above it (its parentid points there)
 
-|- means: threadid points to ID of post in the column where | is.
-
-Reply0 (OP)
+"root" (default threadid)
+-(Reply0)                       # Reply0 is the post with id = threadid
 |-Reply1
-|-Reply2
-|--Reply2Int1 (can become OP)   # Identified as interjections by having parentid set
+|-Reply2                        # There is no Reply2Int0.
+|--Reply2Int1  (Reply0)         # Identified as interjections by having parentid set
    |-Reply2Int1 Reply1          # not displayed in this thread
-   |-...
+   |-...        Reply...
 |--Reply2Int2
-
-==Load Reply2Int1==>
+|-Reply3 
+|-...
+^ current threadid
+>>>^ go in one level by setting current threadid to Reply2Int1
 
 Reply2Int1 (OP)
 |-Reply2Int1Reply1              # displayed in this thread
 |-...
-
-<== Go up one level by loading OP's threadid==
+<<<^ go up one level by loading OP's threadid
 */
 document.addEventListener("DOMContentLoaded", function() {
 // DataModel - Metaphorically a picture of how data is literally shaped on the frontend.
-    var threadid  = "root", // Current global threadid being displayed
-        user = "djtëstio", // Current logged in username (key in humans table)
+    var user = "djtëstio", // Current logged in username (key in humans table)
         loadThread = (function(new_threadid) {
         var data = [],
             requests = 2; // When this hits 0, render the thread.
@@ -194,7 +191,7 @@ document.addEventListener("DOMContentLoaded", function() {
             data.unshift(d);
             if (--requests == 0) {
                 renderThread(data);
-                threadid = new_threadid;
+                d3.select('#posted').value = new_threadid;
             }
         });
         // Get the other posts
@@ -213,22 +210,26 @@ document.addEventListener("DOMContentLoaded", function() {
                     if (!(a.parentid || b.parentid)) {
                         return d3.ascending(a, b);
                     } 
-                    if (a.parentid && b.parentid) {
+                    else if (a.parentid && b.parentid) {
                         if (a.parentid === b.parentid) {
                             return d3.descending(a, b);
                         }
                         return d3.ascending(a, b);
                     }
-                    if (a.parentid) {
+                    else if (a.parentid) {
                         return d3.ascending(posts_by_id[a.parentid].created, b.created) || d3.descending(a.created, b.created)
                     }
+                    else if (b.parentid) {
+                        return d3.ascending(a.created, posts_by_id[b.parentid]) || d3.descending(a.created, b.created);
+                    }
+                    throw "HOW DID YOU GET HERE?";
                 });
                 posts.forEach(function(post) {
                     data.push(post.doc);
                 });
                 if (--requests == 0) {
                     renderThread(data);
-                    threadid = new_threadid;
+                    d3.select('#posted').group(0)[0].value = new_threadid;
                 }
             })
             .send('POST', JSON.stringify({
@@ -545,6 +546,34 @@ document.addEventListener("DOMContentLoaded", function() {
                 <button class="edit">Edit</button>
                 <button class="delete">Delete</button>
                 <button class="interject">Interject!</button>
+            </div>
+        </div>
+    </div>
+    <div id="template" class="post">
+        <div class="header">
+            <div class="miniprofile">
+                <img src="/static/davenport/prophat.jpg" class="avatar">
+                <div class="nick">DJ Tëstio</div>
+                <div class="title">#E_REKT</div>
+            </div>
+            <input type="hidden" class="id" />
+            <input type="hidden" class="rev" />
+            <div class="subject">Imma loadin' some posts!</div>
+            <div class="lasted">2015-03-11T00:04:20.514Z</div>
+            <div class="clearer"></div>
+        </div>
+        <div class="content">Post pictures of toast.</div>
+        <div class="footer">
+            <div class="signature"></div>
+            <div class="container">
+                <button class="link">Link</button>
+                <button class="edit">Edit</button>
+                <button class="save">Save</button>
+                <button class="cancel">Cancel</button>
+                <button class="delete">Delete</button>
+                <button class="load">Load</button>
+                <button class="interject">Interject!</button>
+                <button class="reply">Reply</button>
             </div>
         </div>
     </div>

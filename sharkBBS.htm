@@ -395,7 +395,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 });
             $post.select('.interject')
                 .on('click', function(e) { 
-                var $nposted = d3.select(document.createElement("<div></div>")),
+                var $nposted = d3.select(document.createElement("div")),
                     that = this
                     d3.select(that).style("display", "none");
                     $nposted.html(d3.select('#template').html())

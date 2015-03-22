@@ -115,11 +115,25 @@ button {
 }
 .post .footer button {
     margin: 0 -1pt -1pt 0;
+    display: none;
 }
 /* Bullshit for miniprofiles in posts */
 .post .miniprofile {
     margin: -1pt 3pt -1pt -1pt;
     float: left;
+}
+/* Bullshit for normal posts (replies) */
+.post.reply .link {
+    display: initial;
+}
+.post.reply .edit {
+    display: initial;
+}
+.post.reply .delete {
+    display: initial;
+}
+.post.reply .interject {
+    display: initial;
 }
 /* Bullshit for the OP */
 .post.op div, .post.op {
@@ -127,6 +141,15 @@ button {
 }
 .post.op .subject{
     color: orange
+}
+.post.op .link {
+    display: initial;
+}
+.post.op .edit {
+    display: initial;
+}
+.post.op .interject {
+    display: initial;
 }
 /* Bullshit for interjection stubs */
 .post.interjection .content,.post.interjection .signature {
@@ -148,6 +171,15 @@ button {
     display: block;
     font-weight: normal;
     font-size: 12pt;
+}
+.post.posted .save {
+    display: initial;
+}
+.post.posted .edit {
+    display: none;
+}
+.post.replyed .reply {
+    display: initial;
 }
 </style>
 <title>Couchlocked...</title>
@@ -191,7 +223,8 @@ document.addEventListener("DOMContentLoaded", function() {
             data.unshift(d);
             if (--requests == 0) {
                 renderThread(data);
-                d3.select('#posted').value = new_threadid;
+                d3.select('.threadid')
+                    .attr('value', new_threadid);
             }
         });
         // Get the other posts
@@ -202,9 +235,10 @@ document.addEventListener("DOMContentLoaded", function() {
                     posts = rdata.rows,
                     posts_by_id = {};
                 posts.forEach(function(post) {
-                    posts_by_id[post.id] = post;
+                    posts_by_id[post.id] = post.doc;
+                    post.doc.cssclass = 'reply';
                 })
-                // Sort posts primariy on either their creation date or their parents' cration date (if it exists).
+                // Sort posts primariy on either their creation date or their parents' creation date (if it exists).
                 // In the event of ties (which will occur between posts and their interjections), sort in reverse.
                 posts.sort(function(a, b) {
                     if (!(a.parentid || b.parentid)) {
@@ -217,7 +251,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         return d3.ascending(a, b);
                     }
                     else if (a.parentid) {
-                        return d3.ascending(posts_by_id[a.parentid].created, b.created) || d3.descending(a.created, b.created)
+                        return d3.ascending(posts_by_id[a.parentid].created, b.created) || d3.descending(a.created, b.created);
                     }
                     else if (b.parentid) {
                         return d3.ascending(a.created, posts_by_id[b.parentid]) || d3.descending(a.created, b.created);
@@ -229,15 +263,15 @@ document.addEventListener("DOMContentLoaded", function() {
                 });
                 if (--requests == 0) {
                     renderThread(data);
-                    d3.select('#posted').group(0)[0].value = new_threadid;
+                    d3.select('.threadid').value(new_threadid);
                 }
             })
             .send('POST', JSON.stringify({
                 "keys": [new_threadid]
             }));
         }),
+       // Given an element which is a post (or post editor), return the post JSON object
         getPost = (function(posted, now) { 
-        // Given an element which is a post (or post editor), return the post JSON object
         var subject = posted.querySelector('.subject'),
             content = posted.querySelector('.content'),
             signature = posted.querySelector('.signature'),
@@ -259,113 +293,69 @@ document.addEventListener("DOMContentLoaded", function() {
 // Application - Metaphorically a picture of how data is metaphorically shaped on the backend
         renderThread = function(posts) {
         var $posts = d3.select("#posts").selectAll("div.post")
-                   .data(posts, function(d) { return d._id;}),
+                    .data(posts, function(d) { return d._id;}),
             $npost = $posts.enter()
                     .append('div')
+                    .html(d3.select('#template').html())
                     .attr('class', function(d) { 
                         if (d.cssclass) return 'post ' + d.cssclass; 
-                        else return 'post';}),
-            $header = $npost.append('div')
-                .attr('class', 'header'),
-            $miniprofile = $header.append('div')
-                .attr('class', 'miniprofile'), 
-            $content = $npost.append('div')
-                .text(function(d) { return d.content; })
-                .attr('class', 'content')
+                        else return 'post';
+                    }),
+            updatePost = function($post) { 
+            // Currently, we set text, value, and src of elements with these classes to their corresponding data.
+            // We could be more careful about what to do to what kinds of elements, buuuut, let's not.
+            var fields = ['_rev', '_id', 'owner', 'subject', 'lasted', 'content', 'signature', 'threadid'],
+                ownerFields = ['avatar', 'nick', 'title']; 
+            fields.forEach(function(field) {
+                var $field = $post.select('.' + field),
+                    func = (function(d) { return d[field]; });
+                $field.attr('src', func);
+                $field.attr('value', func);
+                $field.text(func);
+            });
+            ownerFields.forEach(function(field) {
+                var $field = $post.select('.' + field),
+                    func = (function(d) { return users[d.owner][field]; });
+                $field.attr('src', func);
+                $field.attr('value', func);
+                $field.text(func);
+            });
+            $post.select('.content')
                 .style('display', function(d) {
                     return d.content ? "unset" : "none";
-                }),
-            $footer = $npost.append('div')
-                .attr('class', 'footer'), 
-            $buttoncon, $edit
-        console.log("RENDERING POSTS:", posts);
-        // Delete posts that no longer exist
-        $posts.exit().remove(); // XXX NEXT UP ON JAVASCRIPT - TRANSITION FWOOSH TO LEFT
-        // Update an existing post
-        $posts.select('.rev')
-            .attr("value", function(d) { return d._rev; });
-        $posts.select('.subject')
-            .text(function(d) { return d.subject; });
-        $posts.select('.lasted')
-            .text(function(d) { return d.lasted; });
-        $posts.select('.content')
-            .text(function(d) { return d.content; });
-        $posts.select('.signature')
-            .text(function(d) { return d.signature; });
-        // Create a new post
-        $header.append("input")
-            .attr("type", "hidden")
-            .attr("class", 'id')
-            .attr("value", function(d) { return d._id });
-        $header.append("input")
-            .attr("type", "hidden")
-            .attr("class", 'rev')
-            .attr("value", function(d) { return d._rev });
-        $header.append("input")
-            .attr("type", "hidden")
-            .attr("class", 'owner')
-            .attr("value", function(d) { return d.owner});
-        $header.append("input")
-            .attr("type", "hidden")
-            .attr("class", 'threadid')
-            .attr("value", function(d) { return d.threadid});
-        // miniprofile -- should probably go behind a user cache
-        // XXX Not updated
-        $miniprofile.append('img')
-            .attr('src', function(d) { return users[d.owner].avatar;})
-            .attr('class', 'avatar');
-        $miniprofile.append('div')
-            .attr('class', 'nick')
-            .text(function(d) { return users[d.owner].nick;});
-        $miniprofile.append('div')
-            .attr('class', 'title')
-            .text(function(d) { return users[d.owner].title;});
-        // header
-        $header.append('div')
-            .attr('class', 'subject')
-            .text(function(d) { return d.subject });
-        $header.append('div')
-            .attr('class', 'lasted')
-            .text(function(d) { return d.lasted;});
-        $header.append('div')
-            .attr('class', 'clearer');
-        // footer
-        $footer.append('div')
-            .attr('class', 'signature')
-            .text(function(d) { return d.signature;})
-            .style('display', function(d) {
-                return d.content ? "unset" : "none";
-            });
-        $buttoncon = $footer.append('div')
-                .attr('class', 'container');
-        $buttoncon.append('button') // XXX NEXT UP ON JAVASCRIPT, MAKE LINK WORK
-            .attr('class', 'link')
-            .text("Link")
-            .style('display', function(d) {
-                return d.content ? "unset" : "none";
-            });
-        $edit = $buttoncon.append('button')
-            .attr('class', 'edit')
-            .text("Edit")
-            .on('click', function editclick() { 
-                // Clicked "edit"
-                var posted = this.closest('.post'),
-                    post = getPost(posted),
-                    hidden_sel = '.delete,.interject',
-                    that = this;
-                d3.select(that).selectAll(hidden_sel).style('display', 'none');
-                d3.select(that).text("Save");
-                if (posted.querySelector('.content').textContent) {
-                    posted.querySelector('.content')
-                        .outerHTML = '<textarea class="content">' + post.content + '</textarea>';
-                }
-                posted.querySelector('.subject')
-                    .outerHTML = '<input class="subject" value="' + post.subject + '" />';
-                d3.select(that).on('click', function() { 
-                    // Clicked "save"
-                    var post = getPost(posted, new Date().toISOString()), // XXX NO DATE
-                        rev = posted.querySelector('.rev').value,
-                        id = posted.querySelector('.id').value;
+                });
+            $post.select('.content')
+                .style('display', function(d) {
+                    return d.content ? "unset" : "none";
+                });
+            $post.select('.signature')
+                .style('display', function(d) {
+                    return d.content ? "unset" : "none";
+                });
+            $post.select('.link')
+                .style('display', function(d) {
+                    return d.content ? "unset" : "none";
+                });
+            $post.select('.edit')
+                .on('click', function () {
+                    // Clicked "edit"
+                    var posted = this.closest('.post'),
+                        post = getPost(posted),
+                        that = this;
+                    d3.select(posted).classed("posted", true);
+                    if (posted.querySelector('.content').textContent) {
+                        posted.querySelector('.content')
+                            .outerHTML = '<textarea class="content">' + post.content + '</textarea>';
+                    }
+                    posted.querySelector('.subject')
+                        .outerHTML = '<input class="subject" value="' + post.subject + '" />';
+                });
+            $post.select('.save')
+                .on('click', function () {
+                    var posted = this.closest('.post'),
+                        post = getPost(posted, new Date().toISOString()), // XXX NO DATE
+                        rev = posted.querySelector('._rev').value,
+                        id = posted.querySelector('._id').value;
                     console.log("Saving..");
                     d3.xhr(urls.post + '/' + id + "?rev=" + rev)
                         .mimeType("application/json")
@@ -376,41 +366,44 @@ document.addEventListener("DOMContentLoaded", function() {
                         .on('load', function(resp) {
                             // Post has been saved, unhide buttons, 
                             console.log("GOOD JOB", resp);
-                            d3.select(that).text('Edit');
-                            d3.select(that).selectAll(hidden_sel).style('display', 'initial');
+                            d3.select(posted).classed("posted", false);
                             posted.querySelector('.subject')
                                 .outerHTML = '<div class="subject"></div>';
                             posted.querySelector('.content')
                                 .outerHTML = '<div class="content"></div>';
-                            d3.select(that).on('click', editclick);
                             loadThread("root");
                          })
                         .send('PUT', JSON.stringify(post));
                 });
-            });
-        $buttoncon.append('button')
-            .attr('class', 'delete')
-            .text("Delete")
-            .on('click', function() {
-                var id = this.closest('.post').querySelector('.id').value,
-                    rev = this.closest('.post').querySelector('.rev').value;
-                console.log(id);
-                d3.xhr(urls.posts + '/' + id + "?rev=" + rev)
-                .on('error', function(e) {
-                    console.error(e); 
-                    alert("SHIT POST");
+            $post.select('.delete')
+                .on('click', function() {
+                    var id = this.closest('.post').querySelector('._id').value,
+                        rev = this.closest('.post').querySelector('._rev').value;
+                    console.log(id);
+                    d3.xhr(urls.posts + '/' + id + "?rev=" + rev)
+                    .on('error', function(e) {
+                        console.error(e); 
+                        alert("SHIT POST");
+                    })
+                    .on('load', function(e) {
+                        loadThread("root")
+                    })
+                    .send('DELETE');
+                });
+            $post.select('.interject')
+                .on('click', function(e) { // NEXT UP ON JAVASCRIPT: MAKE INTERJECT WORK
+                    
                 })
-                .on('load', function(e) {
-                    loadThread("root")
-                })
-                .send('DELETE');
-            });
-        $buttoncon.append('button') // NEXT UP ON JAVASCRIPT: MAKE INTERJECT WORK
-            .attr('class', 'interject')
-            .text("Interject!");
+        }
+        console.log("RENDERING POSTS:", posts);
+        // Delete posts that no longer exist
+        $posts.exit().remove(); // XXX NEXT UP ON JAVASCRIPT - TRANSITION FWOOSH TO LEFT
+        // Update an existing post
+        updatePost($posts)
+        updatePost($npost)
 
         // Set up the reply editor
-        d3.select(".reply").on("click", function() {
+        d3.select("#posted .reply").on("click", function() {
             var posted = this.closest('.post');
             console.log("Posted is", posted);
             // Get a uuid
@@ -454,101 +447,6 @@ document.addEventListener("DOMContentLoaded", function() {
 <!-- This gets filled out by D3 --!>
 </div>
 <div class="posts">
-    <div class="post">
-        <div class="header">
-            <div class="miniprofile">
-                <img src="/static/davenport/prophat.jpg" class="avatar">
-                <div class="nick">DJ Tëstio</div>
-                <div class="title">Data Victim</div>
-            </div>
-            <input type="hidden" class="id" value="472bb693d90624e0d5578d339a010bf9">
-            <input type="hidden" class="rev" value="3-dd8b82fe9f1bab4f2d29a1bd03d60156">
-            <div class="subject">TEST POAST ONE</div>
-            <div class="lasted">2015-03-11T00:04:20.514Z</div>
-            <div class="clearer"></div>
-        </div>
-        <div class="content">Post pictures of toast.</div>
-        <div class="footer">
-            <div class="signature">When one has much to put into them, a day has a hundred pockets 
- - Nietzche </div>
-            <div class="container">
-                <button class="link">Link</button>
-                <button class="edit">Edit</button>
-                <button class="delete">Delete</button>
-                <button class="interject">Interject!</button>
-            </div>
-        </div>
-    </div>
-    <div class="interjection post">
-        <div class="header">
-            <div class="miniprofile">
-                <img src="/static/davenport/prophat.jpg" class="avatar">
-                <div class="nick">DJ Tëstio</div>
-                <div class="title">Data Victim</div>
-            </div>
-            <input type="hidden" class="id" value="472bb693d90624e0d5578d339a010bf9">
-            <input type="hidden" class="rev" value="3-dd8b82fe9f1bab4f2d29a1bd03d60156">
-            <div class="subject">LET ME INTERJECT FOR A MOMENT...</div>
-            <div class="lasted">2015-03-11T00:04:20.514Z</div>
-            <div class="clearer"></div>
-        </div>
-        <div class="content">Post pictures of toast.</div>
-        <div class="footer">
-            <div class="signature">When one has much to put into them, a day has a hundred pockets 
- - Nietzche </div>
-            <div class="container">
-                <button class="show">Show</button>
-                <button class="load">Load</button>
-            </div>
-        </div>
-    </div>
-    <div class="interjection post">
-        <div class="header">
-            <div class="miniprofile">
-                <img src="/static/davenport/prophat.jpg" class="avatar">
-                <div class="nick">DJ Tëstio</div>
-                <div class="title">Data Victim</div>
-            </div>
-            <input type="hidden" class="id" value="472bb693d90624e0d5578d339a010bf9">
-            <input type="hidden" class="rev" value="3-dd8b82fe9f1bab4f2d29a1bd03d60156">
-            <div class="subject">MYELF AS WELL ...</div>
-            <div class="lasted">2015-03-11T00:04:20.514Z</div>
-            <div class="clearer"></div>
-        </div>
-        <div class="content">Post pictures of toast.</div>
-        <div class="footer">
-            <div class="signature">When one has much to put into them, a day has a hundred pockets 
- - Nietzche </div>
-            <div class="container">
-                <button class="load">Load</button>
-            </div>
-        </div>
-    </div>
-    <div class="post">
-        <div class="header">
-            <div class="miniprofile">
-                <img src="/static/davenport/prophat.jpg" class="avatar">
-                <div class="nick">DJ Tëstio</div>
-                <div class="title">Data Victim</div>
-            </div>
-            <input type="hidden" class="id" value="472bb693d90624e0d5578d339a010bf9">
-            <input type="hidden" class="rev" value="3-dd8b82fe9f1bab4f2d29a1bd03d60156">
-            <div class="subject">TEST POAST TWO</div>
-            <div class="lasted">2015-03-11T00:04:20.514Z</div>
-            <div class="clearer"></div>
-        </div>
-        <div class="content">Post pictures of toast.</div>
-        <div class="footer">
-            <div class="signature">When one has much to put into them, a day has a hundred pockets 
- - Nietzche </div>
-            <div class="container">
-                <button class="link">Link</button>
-                <button class="edit">Edit</button>
-                <button class="delete">Delete</button>
-                <button class="interject">Interject!</button>
-            </div>
-        </div>
-    </div>
     <div id="template" class="post">
         <div class="header">
             <div class="miniprofile">
@@ -556,8 +454,10 @@ document.addEventListener("DOMContentLoaded", function() {
                 <div class="nick">DJ Tëstio</div>
                 <div class="title">#E_REKT</div>
             </div>
-            <input type="hidden" class="id" />
-            <input type="hidden" class="rev" />
+            <input type="hidden" class="_id" />
+            <input type="hidden" class="_rev" />
+            <input type="hidden" class="owner" />
+            <input type="hidden" class="threadid" />
             <div class="subject">Imma loadin' some posts!</div>
             <div class="lasted">2015-03-11T00:04:20.514Z</div>
             <div class="clearer"></div>
@@ -577,7 +477,7 @@ document.addEventListener("DOMContentLoaded", function() {
             </div>
         </div>
     </div>
-    <div class="post" id="posted"> 
+    <div class="post replyed" id="posted"> 
         <div class="header">
             <div class="miniprofile">
                 <img class="avatar" src="prophat.jpg" />

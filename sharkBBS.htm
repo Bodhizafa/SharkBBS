@@ -394,7 +394,28 @@ document.addEventListener("DOMContentLoaded", function() {
                     .send('DELETE');
                 });
             $post.select('.interject')
-                .on('click', function(e) { // NEXT UP ON JAVASCRIPT: MAKE INTERJECT WORK
+                .on('click', function(e) { 
+                var $nposted = d3.select(document.createElement("<div></div>")),
+                    that = this
+                    d3.select(that).style("display", "none");
+                    $nposted.html(d3.select('#template').html())
+                        .attr('class', "post interjection posted")
+                        .attr('id', "")
+                    $nposted.select('.subject').node()
+                        .outerHTML = '<div class="subject"></div>';
+                    $nposted.select('.content').node()
+                        .outerHTML = '<div class="content"></div>';
+                    $nposted.select('.interject')
+                        .style('display', 'initial')
+                        .on('click', function() {
+                            // XXX NEXT UP ON JAVASCRIPT, SAVE THE INTERJECTION
+                        })
+                    $nposted.select('.cancel')
+                        .style('display', 'initial')
+                        .on('click', function(e) {
+                            d3.select(that.closest('.interject')).style('dispay', 'initial');
+                            d3.select(this.closest('.posted')).remove();
+                        });
                     
                 })
         }
@@ -402,9 +423,9 @@ document.addEventListener("DOMContentLoaded", function() {
         // Delete posts that no longer exist
         $posts.exit().remove(); // XXX NEXT UP ON JAVASCRIPT - TRANSITION FWOOSH TO LEFT
         // Update an existing post
-        updatePost($posts)
+        updatePost($posts);
         // Update the new post
-        updatePost($npost)
+        updatePost($npost);
 
         // Set up the reply editor
         d3.select("#base_posted .reply").on("click", function() {

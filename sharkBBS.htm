@@ -123,9 +123,6 @@ button {
     float: left;
 }
 /* Bullshit for normal posts (replies) */
-.post.reply .link {
-    display: initial;
-}
 .post.reply .edit {
     display: initial;
 }
@@ -141,9 +138,6 @@ button {
 }
 .post.op .subject{
     color: orange
-}
-.post.op .link {
-    display: initial;
 }
 .post.op .edit {
     display: initial;
@@ -173,6 +167,9 @@ button {
     font-size: 12pt;
 }
 .post.posted .save {
+    display: initial;
+}
+.post.posted .cancel {
     display: initial;
 }
 .post.posted .edit {
@@ -263,7 +260,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 });
                 if (--requests == 0) {
                     renderThread(data);
-                    d3.select('.threadid').value(new_threadid);
+                    d3.select('.threadid').attr("value", new_threadid);
                 }
             })
             .send('POST', JSON.stringify({
@@ -332,10 +329,6 @@ document.addEventListener("DOMContentLoaded", function() {
                 .style('display', function(d) {
                     return d.content ? "unset" : "none";
                 });
-            $post.select('.link')
-                .style('display', function(d) {
-                    return d.content ? "unset" : "none";
-                });
             $post.select('.edit')
                 .on('click', function () {
                     // Clicked "edit"
@@ -349,6 +342,16 @@ document.addEventListener("DOMContentLoaded", function() {
                     }
                     posted.querySelector('.subject')
                         .outerHTML = '<input class="subject" value="' + post.subject + '" />';
+                });
+            $post.select('.cancel')
+                .on('click', function () {
+                    var posted = this.closest('.post')
+                    d3.select(posted).classed("posted", false);
+                    posted.querySelector('.subject')
+                        .outerHTML = '<div class="subject"></div>';
+                    posted.querySelector('.content')
+                        .outerHTML = '<div class="content"></div>';
+                    loadThread("root");
                 });
             $post.select('.save')
                 .on('click', function () {
@@ -400,10 +403,11 @@ document.addEventListener("DOMContentLoaded", function() {
         $posts.exit().remove(); // XXX NEXT UP ON JAVASCRIPT - TRANSITION FWOOSH TO LEFT
         // Update an existing post
         updatePost($posts)
+        // Update the new post
         updatePost($npost)
 
         // Set up the reply editor
-        d3.select("#posted .reply").on("click", function() {
+        d3.select("#base_posted .reply").on("click", function() {
             var posted = this.closest('.post');
             console.log("Posted is", posted);
             // Get a uuid
@@ -466,7 +470,6 @@ document.addEventListener("DOMContentLoaded", function() {
         <div class="footer">
             <div class="signature"></div>
             <div class="container">
-                <button class="link">Link</button>
                 <button class="edit">Edit</button>
                 <button class="save">Save</button>
                 <button class="cancel">Cancel</button>
@@ -477,7 +480,7 @@ document.addEventListener("DOMContentLoaded", function() {
             </div>
         </div>
     </div>
-    <div class="post replyed" id="posted"> 
+    <div class="post replyed" id="base_posted"> 
         <div class="header">
             <div class="miniprofile">
                 <img class="avatar" src="prophat.jpg" />

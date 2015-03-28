@@ -13,6 +13,9 @@ function (newDoc, oldDoc, userCtx, secObj) {
     if (newDoc.threadid === 'PRISMO') {
         throw 'Hey. What the fuck are you doing here?';
     }
+    if (!newDoc.owner) {
+        throw {forbidden: 'Must have an owner'};
+    }
     if (oldDoc !== null) {
         if (newDoc.created !== oldDoc.created) {
             throw {forbidden: 'Attempted to change post created'};

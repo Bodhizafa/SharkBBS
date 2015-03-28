@@ -386,7 +386,6 @@ document.addEventListener("DOMContentLoaded", function() {
                         .outerHTML = '<div class="subject"></div>';
                     posted.querySelector('.content')
                         .outerHTML = '<div class="content"></div>';
-                    d3.selectAll('#posts .interject').style("display", "initial");
                     loadThread(thread);
                 });
             $post.select('.save')
@@ -422,6 +421,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     .send('DELETE');
                 });
             $post.select('.interject')
+                .style('display', 'initial')
                 .on('click', function(e) { 
                 var $nposted = d3.select(document.createElement("div")),
                     that = this, 
@@ -449,7 +449,6 @@ document.addEventListener("DOMContentLoaded", function() {
                     $nposted.select('.cancel')
                         .style('display', 'initial')
                         .on('click', function() {
-                            d3.selectAll('#posts .interject').style("display", "initial");
                             $nposted.remove();
                         });
                     document.getElementById('posts')

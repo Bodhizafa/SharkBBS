@@ -11,7 +11,7 @@ function (newDoc, oldDoc, userCtx, secObj) {
         return true;
     }
     if (newDoc.threadid === 'PRISMO') {
-        throw "Hey. What the fuck are you doing here?";
+        throw 'Hey. What the fuck are you doing here?';
     }
     if (oldDoc !== null) {
         if (newDoc.created !== oldDoc.created) {
@@ -45,14 +45,17 @@ function (doc, req) {
         }
         newDoc.created = now;
         newDoc.lasted = now;
-        return [newDoc, 'Posted'];
+        return [newDoc, ''];
     } else {
         log('EDIT THE DOCUMENTSING');
         log(newDoc);
         log(req);
-        doc._id = doc._id || req.uuid;
-        if (req.query.rev !== doc._rev) {
-            throw {conflict: 'MVCC conflict'};
+        if (req.id && doc._id && req.id !== doc._id) {
+            throw {conflict: 'Contradictory request'};
+        }
+        doc._id = doc._id || req.id || req.uuid;
+        if (doc._rev !== newDoc._rev) {
+            throw {conflict: 'MVCCCCCC conflict' + doc._rev + ' vs ' + newDoc._rev};
         }
         Object.keys(newDoc).forEach(function(k) {
             log('THING MUTATED');
@@ -63,7 +66,7 @@ function (doc, req) {
         });
         doc.lasted = now;
         log(doc);
-        return [doc, 'Edited'];
+        return [doc, ''];
     }
 }
 "

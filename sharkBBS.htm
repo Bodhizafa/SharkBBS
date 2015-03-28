@@ -146,10 +146,6 @@ button {
     display: initial;
 }
 /* Bullshit for interjection stubs */
-.post.interjection .content,.post.interjection .signature {
-    display: none;
-}
-
 .post.interjection {
     margin-left:48pt;
 }
@@ -168,6 +164,9 @@ button {
 }
 .post.posted .save {
     display: initial;
+}
+.post.posted.interjection .save {
+    display: none;
 }
 .post.posted .cancel {
     display: initial;
@@ -268,12 +267,14 @@ document.addEventListener("DOMContentLoaded", function() {
             }));
         }),
        // Given an element which is a post (or post editor), return the post JSON object
-        getPost = (function(posted, now) { 
+        getPost = function(posted) { 
         var subject = posted.querySelector('.subject'),
             content = posted.querySelector('.content'),
             signature = posted.querySelector('.signature'),
             owner = posted.querySelector('.owner'),
             threadid = posted.querySelector('.threadid'),
+            _id = posted.querySelector("._id"),
+            _rev = posted.querySelector("._rev"),
             post = {
                 "owner": owner.value || owner.textContent,
                 "threadid": threadid.value || threadid.textContent,
@@ -282,11 +283,44 @@ document.addEventListener("DOMContentLoaded", function() {
                 "renderer": "text",
                 "signature": signature.value || signature.textContent
             };
-            if (now) {
-                post.lasted = now;
+            if (_id) {
+                post._id = _id.value || _id.textContent;
+            }
+            if (_rev) {
+                post._rev = _rev.value || _rev.textContent;
             }
             return post;
-        }),
+        },
+        postPost = function(post, callback) { 
+        var actuallyPostPost = function() {
+            var revstr = post._rev ? "?rev=" + post._rev : "";
+            d3.xhr(urls.post + post._id + revstr)
+                .mimeType("application/json")
+                .on('error', function(e) {
+                    console.error(e); 
+                    alert("SHIT POST");
+                 })
+                .on('load', function(resp) {
+                    console.log("GOOD JOB", resp.response);
+                    callback();
+                 })
+                .send('POST', JSON.stringify(post));
+                console.log("Attempted to post", post);
+            };
+            if (post._id && !post._rev) {
+                console.log("Tried to post post with ID nut not rev", post);
+                alert("SHIT POST");
+            };
+            if (!post._id) {
+                // THIS IS NOT ACTUALLY JUST URANDOM-AS-A-SERVICE.
+                d3.xhr(urls.uuids, function(resp) {
+                    post._id = JSON.parse(resp.response)['uuids'][0];
+                    actuallyPostPost();
+                });
+            } else {
+                actuallyPostPost();
+            }
+        },
 // Application - Metaphorically a picture of how data is metaphorically shaped on the backend
         renderThread = function(posts) {
         var $posts = d3.select("#posts").selectAll("div.post")
@@ -298,9 +332,9 @@ document.addEventListener("DOMContentLoaded", function() {
                         if (d.cssclass) return 'post ' + d.cssclass; 
                         else return 'post';
                     }),
-            updatePost = function($post) { 
             // Currently, we set text, value, and src of elements with these classes to their corresponding data.
             // We could be more careful about what to do to what kinds of elements, buuuut, let's not.
+            updatePost = function($post) { 
             var fields = ['_rev', '_id', 'owner', 'subject', 'lasted', 'content', 'signature', 'threadid'],
                 ownerFields = ['avatar', 'nick', 'title']; 
             fields.forEach(function(field) {
@@ -345,43 +379,37 @@ document.addEventListener("DOMContentLoaded", function() {
                 });
             $post.select('.cancel')
                 .on('click', function () {
-                    var posted = this.closest('.post')
+                    var posted = this.closest('.post'),
+                        thread = this.closest('.post').querySelector('.threadid').value;
                     d3.select(posted).classed("posted", false);
                     posted.querySelector('.subject')
                         .outerHTML = '<div class="subject"></div>';
                     posted.querySelector('.content')
                         .outerHTML = '<div class="content"></div>';
-                    loadThread("root");
+                    d3.selectAll('#posts .interject').style("display", "initial");
+                    loadThread(thread);
                 });
             $post.select('.save')
                 .on('click', function () {
                     var posted = this.closest('.post'),
-                        post = getPost(posted, new Date().toISOString()), // XXX NO DATE
-                        rev = posted.querySelector('._rev').value,
-                        id = posted.querySelector('._id').value;
+                        post = getPost(posted), // XXX NO DATE
+                        thread = posted.querySelector('.threadid').value;
                     console.log("Saving..");
-                    d3.xhr(urls.post + '/' + id + "?rev=" + rev)
-                        .mimeType("application/json")
-                        .on('error', function(e) {
-                            console.error(e); 
-                            alert("SHIT POST");
-                         })
-                        .on('load', function(resp) {
+                    postPost(post, function() {
                             // Post has been saved, unhide buttons, 
-                            console.log("GOOD JOB", resp);
                             d3.select(posted).classed("posted", false);
                             posted.querySelector('.subject')
                                 .outerHTML = '<div class="subject"></div>';
                             posted.querySelector('.content')
-                                .outerHTML = '<div class="content"></div>';
-                            loadThread("root");
-                         })
-                        .send('PUT', JSON.stringify(post));
+                                .outerHTML = '<div class="content">loading...</div>';
+                            loadThread(thread);
+                    });
                 });
             $post.select('.delete')
                 .on('click', function() {
                     var id = this.closest('.post').querySelector('._id').value,
-                        rev = this.closest('.post').querySelector('._rev').value;
+                        rev = this.closest('.post').querySelector('._rev').value,
+                        thread = this.closest('.post').querySelector('.threadid').value;
                     console.log(id);
                     d3.xhr(urls.posts + '/' + id + "?rev=" + rev)
                     .on('error', function(e) {
@@ -389,36 +417,46 @@ document.addEventListener("DOMContentLoaded", function() {
                         alert("SHIT POST");
                     })
                     .on('load', function(e) {
-                        loadThread("root")
+                        loadThread(thread)
                     })
                     .send('DELETE');
                 });
             $post.select('.interject')
                 .on('click', function(e) { 
                 var $nposted = d3.select(document.createElement("div")),
-                    that = this
-                    d3.select(that).style("display", "none");
+                    that = this, 
+                    thread = d3.select(that.closest('.post'))
+                                        .select('.threadid').attr('value');
+                    console.log("Interjecting")
+                    d3.selectAll('#posts .interject').style("display", "none");
                     $nposted.html(d3.select('#template').html())
                         .attr('class', "post interjection posted")
                         .attr('id', "")
                     $nposted.select('.subject').node()
-                        .outerHTML = '<div class="subject"></div>';
+                        .outerHTML = '<input class="subject" />';
                     $nposted.select('.content').node()
-                        .outerHTML = '<div class="content"></div>';
+                        .outerHTML = '<textarea class="content"></textarea>';
+                    $nposted.select('.threadid').
+                        attr('value', thread);
                     $nposted.select('.interject')
                         .style('display', 'initial')
                         .on('click', function() {
+                        var post = getPost(posted);
                             // XXX NEXT UP ON JAVASCRIPT, SAVE THE INTERJECTION
+                            loadThread(thread);
                         })
+                    $nposted.datum({});
                     $nposted.select('.cancel')
                         .style('display', 'initial')
-                        .on('click', function(e) {
-                            d3.select(that.closest('.interject')).style('dispay', 'initial');
-                            d3.select(this.closest('.posted')).remove();
+                        .on('click', function() {
+                            d3.selectAll('#posts .interject').style("display", "initial");
+                            $nposted.remove();
                         });
+                    document.getElementById('posts')
+                        .insertBefore($nposted.node(), that.closest('.post').nextSibling)
                     
                 })
-        }
+        };
         console.log("RENDERING POSTS:", posts);
         // Delete posts that no longer exist
         $posts.exit().remove(); // XXX NEXT UP ON JAVASCRIPT - TRANSITION FWOOSH TO LEFT
@@ -430,27 +468,10 @@ document.addEventListener("DOMContentLoaded", function() {
         // Set up the reply editor
         d3.select("#base_posted .reply").on("click", function() {
             var posted = this.closest('.post');
-            console.log("Posted is", posted);
-            // Get a uuid
-            d3.xhr(urls.uuids, function(resp) {
-                var now = new Date(resp.getResponseHeader('Date')).toISOString(),
-                    id = JSON.parse(resp.response)['uuids'][0],
-                    post = getPost(posted, now);            // Post the post
-                post.created = now;
-                d3.xhr(urls.posts + '/' + id)
-                    .mimeType("application/json")
-                    .on('error', function(e) {
-                        console.error(e); 
-                        alert("SHIT POST");
-                     })
-                    .on('load', function(resp) {
-                        var pdata = JSON.parse(resp.response);
-                        console.log("GOOD JOB", pdata);
-                        loadThread("root");
-                        posted.querySelector('.content').value = "";
-                     })
-                    .send('PUT', JSON.stringify(post));
-                    console.log("Attempted to post", post);
+            var post = getPost(posted);
+            postPost(post, function() {
+                loadThread(post.threadid);
+                posted.querySelector('.content').value = "";
             });
         });
     }
@@ -533,7 +554,7 @@ var urls = {
     "uuids": "http://localhost:5984/_uuids",
     "changes": "http://localhost:5984/posts/_changes",
     "thread": "http://localhost:5984/posts/_design/posts/_view/thread",
-    "post": "http://localhost:5984/posts/_design/posts/_update/post",
+    "post": "http://localhost:5984/posts/_design/posts/_update/post/",
 }
 var users = { // XXX Test users, this should probably get deleted sometime.
     "djtëstio": { // In real life this will be a UUID ... No it won't

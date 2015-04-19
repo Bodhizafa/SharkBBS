@@ -1,5 +1,5 @@
 #!/bin/bash
-ROOT='http://localhost:5984';
+ROOT='http://root:berfberfberfberf@localhost:5984';
 putpage() {
     URL=${ROOT}/static/${1}
     curl -s -X PUT -d '{"root":"index.htm"}' ${URL}

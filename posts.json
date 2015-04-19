@@ -20,6 +20,16 @@ function (newDoc, oldDoc, userCtx, secObj) {
         if (newDoc.created !== oldDoc.created) {
             throw {forbidden: 'Attempted to change post created'};
         }
+        if (oldDoc.owner !== userCtx.name) {
+            var admin = false;
+            userCtx.roles.forEach(function(role) { if (role === 'admin') admin = true; });
+            if (admin) {
+                log('Administrator ' + userCtx.name + ' modifying post owned by ' + oldDoc.owner);
+            } else {
+                log(userCtx.name + ' with roles ' + userCtx.roles + ' cannot modify post owned by ' + oldDoc.owner);
+                throw {forbidden: 'Attempted to change unowned post'};
+            }
+        }
     }
     if (isNaN(Date.parse(newDoc.created))) {
         throw {forbidden: 'Created date is not a date'};
@@ -71,8 +81,7 @@ function (doc, req) {
         log(doc);
         return [doc, ''];
     }
-}
-"
+}"
     },
     "views":
     {

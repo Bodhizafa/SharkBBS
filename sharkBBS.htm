@@ -16,7 +16,7 @@
 
 /* Overall Bullshit */
 body {
-    font-family: sans-serif;
+    font-family: monospace;
     background-color: black;
     color: #0FF;
     margin: 0;
@@ -35,11 +35,13 @@ button {
     margin: 0;
     padding: 0;
 }
+#template {
+    display: none;
+}
 /* Bullshit for static elements and containers */
 #topbar {
     padding: 2pt;
     position: static;
-    border-bottom: 1pt solid #0FF;
     width:100%;
 }
 .posts {
@@ -151,6 +153,12 @@ button {
 /* Bullshit for interjection stubs */
 .post.interjection {
     margin-left:48pt;
+}
+.post.interjection .content {
+    display: none;
+}
+.post.interjection .signature {
+    display: none;
 }
 .post.interjection .load {
     display: initial;
@@ -346,11 +354,10 @@ document.addEventListener("DOMContentLoaded", function() {
             $npost = $posts.enter()
                     .append('div')
                     .html(d3.select('#template').html()),
-            // Currently, we set text, value, and src of elements with these classes to their corresponding data.
-            // We could be more careful about what to do to what kinds of elements, buuuut, let's not.
             updatePost = function($post) { 
+            // Set text, value, and src of elements with these classes to their corresponding data.
             var fields = ['_rev', '_id', 'owner', 'subject', 'lasted', 'content', 'signature', 'threadid'],
-                ownerFields = ['avatar', 'nick', 'title']; 
+                ownerFields = ['avatar', 'nick', 'title'];
             fields.forEach(function(field) {
                 var $field = $post.select('.' + field),
                     func = (function(d) { return d[field]; });
@@ -371,15 +378,11 @@ document.addEventListener("DOMContentLoaded", function() {
             }),
             $post.select('.content')
                 .style('display', function(d) {
-                    return d.content ? "unset" : "none";
-                });
-            $post.select('.content')
-                .style('display', function(d) {
-                    return d.content ? "unset" : "none";
+                    return d.content ? null : "none";
                 });
             $post.select('.signature')
                 .style('display', function(d) {
-                    return d.content ? "unset" : "none";
+                    return d.signature ? null : "none";
                 });
             $post.select('.edit')
                 .on('click', function () {
@@ -498,7 +501,12 @@ document.addEventListener("DOMContentLoaded", function() {
         $posts.order();
 
         // Set up the reply editor
-        d3.select("#base_posted .reply").on("click", function() {
+        d3.select("#base_posted")
+            .style('display', 'block')
+        d3.select("#base_posted .owner")
+            .attr('value', user)
+        d3.select("#base_posted .reply")
+            .on("click", function() {
             var posted = this.closest('.post');
             var post = getPost(posted);
             postPost(post, function() {
@@ -507,26 +515,42 @@ document.addEventListener("DOMContentLoaded", function() {
             });
         });
     }
-    window.addEventListener('hashchange', function() {
-        loadThread(window.location.hash.slice(1));
+    d3.select('#login').on('click', function() {
+        var username = this.closest('div').querySelector('.username').value,
+            password = this.closest('div').querySelector('.password').value;
+        d3.xhr(urls.session, function(response) {
+            if (response === null) {
+                console.error("Unsuccessful login");
+                return;
+            }
+            console.log("Successful login", response);
+            user = username;
+            d3.select("div.login").style('display', 'none');
+            // Hash routers are the way of the future
+            window.addEventListener('hashchange', function() {
+                loadThread(window.location.hash.slice(1));
+            });
+            if (window.location.hash) {
+                loadThread(window.location.hash.slice(1));
+            } else {
+                window.location.hash = 'root';
+            }
+        })
+        .header("Content-Type", "application/json")
+        .send("POST", JSON.stringify({
+            "name": username, 
+            "password": password}));
     });
-    if (window.location.hash) {
-        loadThread(window.location.hash.slice(1));
-    } else {
-        window.location.hash = 'root';
-    }
-
 });
 </script>
 </head>
 <body>
 <div id="topbar">
-    <div id="you" class="miniprofile">
-        <img class="avatar" src="prophat.jpg" />
-        <div class="nick">DJ Tëstio!</div><br />
+    <div class="login">
+        <span>Username:</span><input type="text" class="username" /><br />
+        <span>Password:</span><input type="password" class="password" /><br />
+        <button id="login">login</button>
     </div>
-    <div id="important"></div>
-    <div id="new"></div>
 </div>
 <div id="posts" class="posts">
 <!-- This gets filled out by D3 --!>
@@ -562,7 +586,7 @@ document.addEventListener("DOMContentLoaded", function() {
             </div>
         </div>
     </div>
-    <div class="post replyed" id="base_posted"> 
+    <div class="post replyed" style="display: none" id="base_posted"> 
         <div class="header">
             <div class="miniprofile">
                 <img class="avatar" src="prophat.jpg" />
@@ -585,16 +609,18 @@ document.addEventListener("DOMContentLoaded", function() {
         </div>
     </div>
 </div>
+</div>
 </body>
 <script>
 "use strict";
 // Global configuration
 var urls = {
-    "posts": "http://localhost:5984/posts",
-    "uuids": "http://localhost:5984/_uuids",
-    "changes": "http://localhost:5984/posts/_changes",
-    "thread": "http://localhost:5984/posts/_design/posts/_view/thread",
-    "post": "http://localhost:5984/posts/_design/posts/_update/post/",
+    "posts": "/posts",
+    "uuids": "/_uuids",
+    "changes": "/posts/_changes",
+    "thread": "/posts/_design/posts/_view/thread",
+    "post": "/posts/_design/posts/_update/post/",
+    "session": "/_session"
 }
 var users = { // XXX Test users, this should probably get deleted sometime.
     "djtëstio": { // In real life this will be a UUID ... No it won't

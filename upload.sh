@@ -39,4 +39,6 @@ putpage davenport davenport.htm
 putstatic davenport prophat.jpg
 putstatic davenport sharkBBS.htm
 putdoc posts/_design/posts posts.json
+putdoc _config/couch_httpd_auth/public_fields public_fields.json
+putdoc _config/couch_httpd_auth/users_db_public users_db_public.json
 putstatic davenport d3.js application/javascript

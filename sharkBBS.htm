@@ -238,7 +238,8 @@ document.addEventListener("DOMContentLoaded", function() {
             interjections_by_parentid = {},
             actuallyLoadThread = function() { // Called when interjections_by_postid and replies are populated
                 var data = [],
-                    op = replies.shift(); // OP is always first
+                    op = replies.shift(), // OP is always first
+                    newusers = {};  // users missing and needed from the cache
                 replies.sort(function(a, b) { return d3.ascending(a.created, b.created) });
                 replies.unshift(op);
                 replies.forEach(function(reply) {
@@ -254,8 +255,24 @@ document.addEventListener("DOMContentLoaded", function() {
                 if (Object.keys(interjections_by_parentid).length) {
                     console.error("Orphaned posts: ", interjections_by_parentid);
                 }
-                renderThread(data);
-                d3.select('#base_posted .threadid').attr('value', new_threadid);
+                // Prime the users cache, so when we try to render these posts, all the data is there
+                data.forEach(function(post) {
+                    if (users[post.owner] === undefined) {
+                        newusers['org.couchdb.user:' + post.owner] = true;
+                    }
+                })
+                newusers = Object.keys(newusers);
+                d3.xhr(urls.users + "/_all_docs?include_docs=true", function(resp) {
+                    var rows = JSON.parse(resp.response).rows;
+                    rows.forEach(function(row) {
+                        var username = row.id.replace('org.couchdb.user:', '')
+                        users[username] = row.doc;
+                    });
+                    renderThread(data);
+                    d3.select('#base_posted .threadid').attr('value', new_threadid);
+                })
+                .header("Content-Type", "application/json")
+                .send("POST", JSON.stringify({"keys": newusers}))
             };
         // Get the OP
         d3.json(urls.posts + '/' + new_threadid, function(d) {
@@ -320,7 +337,7 @@ document.addEventListener("DOMContentLoaded", function() {
         postPost = function(post, callback) { 
         var actuallyPostPost = function() {
             var revstr = post._rev ? "?rev=" + post._rev : "";
-            d3.xhr(urls.post + post._id + revstr)
+            d3.xhr(urls.post + '/' + post._id + revstr)
                 .mimeType("application/json")
                 .on('error', function(e) {
                     console.error(e); 
@@ -521,6 +538,7 @@ document.addEventListener("DOMContentLoaded", function() {
         d3.xhr(urls.session, function(response) {
             if (response === null) {
                 console.error("Unsuccessful login");
+                alert("Unauthorized!");
                 return;
             }
             console.log("Successful login", response);
@@ -619,11 +637,12 @@ var urls = {
     "uuids": "/_uuids",
     "changes": "/posts/_changes",
     "thread": "/posts/_design/posts/_view/thread",
-    "post": "/posts/_design/posts/_update/post/",
-    "session": "/_session"
+    "post": "/posts/_design/posts/_update/post",
+    "session": "/_session",
+    "users": "/_users"
 }
-var users = { // XXX Test users, this should probably get deleted sometime.
-    "djtëstio": { // In real life this will be a UUID ... No it won't
+var users = { // Cache of user data, primed by actuallyLoadThread()
+    "djtëstio": { 
         "nick": "DJ Tëstio",
         "title": "Data Victim",
         "avatar": "/static/davenport/prophat.jpg",

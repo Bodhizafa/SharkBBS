@@ -35,7 +35,6 @@ echo "MAKING DBS"
 curl -s -X PUT ${ROOT}/static
 curl -s -X PUT ${ROOT}/posts
 echo "PUTTING PAGES"
-putpage davenport davenport.htm
 putstatic davenport prophat.jpg
 putstatic davenport sharkBBS.htm
 putdoc posts/_design/posts posts.json

@@ -47,6 +47,10 @@ button {
 .posts {
     margin: 0 5ex 0 5ex;
 }
+#base_posted {
+    position: relative;
+    top: 10pt;
+}
 /* Bullshit for Users and Profiles */
 .miniprofile .nick {
     font-size: 14pt;
@@ -125,12 +129,6 @@ button {
     float: left;
 }
 /* Bullshit for normal posts (replies) */
-.post.reply .edit {
-    display: initial;
-}
-.post.reply .delete {
-    display: initial;
-}
 .post.reply .interject {
     display: initial;
 }
@@ -142,9 +140,6 @@ button {
     color: orange
 }
 .post.op .unload {
-    display: initial;
-}
-.post.op .edit {
     display: initial;
 }
 .post.op .interject {
@@ -163,14 +158,17 @@ button {
 .post.interjection .load {
     display: initial;
 }
-.post.interjection .delete {
-    display: initial;
-}
 .post.interjection.posted .load {
     display: none;
 }
 .post.interjection.posted .delete {
     display: none;
+}
+.post.interjection.posted .content {
+    display: initial;
+}
+.post.interjection.posted .signature {
+    display: block;
 }
 /* Bullshit for the post editor */
 .post textarea.content {
@@ -195,9 +193,17 @@ button {
     display: initial;
 }
 .post.posted .edit {
-    display: none;
+    display: none !important;
 }
 .post.replyed .reply {
+    display: initial;
+}
+/* Bullshit for my posts */
+
+.post.mine .edit {
+    display: initial;
+}
+.post.mine .delete {
     display: initial;
 }
 </style>
@@ -231,7 +237,7 @@ Reply2Int1 (OP)
 */
 document.addEventListener("DOMContentLoaded", function() {
 // DataModel - Metaphorically a picture of how data is literally shaped on the frontend.
-    var user = "djtëstio", // Current logged in username (key in humans table)
+    var user = "", // Current logged in username (key in _users, without 'org.couchdb.user:')
         loadThread = (function(new_threadid) {
         var replies = [],
             requests = 2, 
@@ -239,7 +245,7 @@ document.addEventListener("DOMContentLoaded", function() {
             actuallyLoadThread = function() { // Called when interjections_by_postid and replies are populated
                 var data = [],
                     op = replies.shift(), // OP is always first
-                    newusers = {};  // users missing and needed from the cache
+                    uncached_by_username = {};  // users missing and needed from the cache
                 replies.sort(function(a, b) { return d3.ascending(a.created, b.created) });
                 replies.unshift(op);
                 replies.forEach(function(reply) {
@@ -258,10 +264,10 @@ document.addEventListener("DOMContentLoaded", function() {
                 // Prime the users cache, so when we try to render these posts, all the data is there
                 data.forEach(function(post) {
                     if (users[post.owner] === undefined) {
-                        newusers['org.couchdb.user:' + post.owner] = true;
+                        uncached_by_username['org.couchdb.user:' + post.owner] = true;
                     }
                 })
-                newusers = Object.keys(newusers);
+                uncached_by_username = Object.keys(uncached_by_username);
                 d3.xhr(urls.users + "/_all_docs?include_docs=true", function(resp) {
                     var rows = JSON.parse(resp.response).rows;
                     rows.forEach(function(row) {
@@ -272,7 +278,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     d3.select('#base_posted .threadid').attr('value', new_threadid);
                 })
                 .header("Content-Type", "application/json")
-                .send("POST", JSON.stringify({"keys": newusers}))
+                .send("POST", JSON.stringify({"keys": uncached_by_username}))
             };
         // Get the OP
         d3.json(urls.posts + '/' + new_threadid, function(d) {
@@ -393,6 +399,9 @@ document.addEventListener("DOMContentLoaded", function() {
                 if (d.cssclass) return 'post ' + d.cssclass; 
                 else return 'post';
             }),
+            $post.classed('mine', function(d) {
+                return d.owner == user;
+            });
             $post.select('.content')
                 .style('display', function(d) {
                     return d.content ? null : "none";
@@ -485,6 +494,10 @@ document.addEventListener("DOMContentLoaded", function() {
                         .attr('value', user);
                     $nposted.select('.signature')
                         .text(users[user].signature);
+                    $nposted.select('.signature').text(users[user].signature);
+                    $nposted.select('.avatar').attr('src', users[user].avatar);
+                    $nposted.select('.title').text(users[user].title);
+                    $nposted.select('.nick').text(users[user].nick);
                     $nposted.select('.interject')
                         .style('display', 'initial')
                         .on('click', function() {
@@ -504,7 +517,6 @@ document.addEventListener("DOMContentLoaded", function() {
                         });
                     document.getElementById('posts')
                         .insertBefore($nposted.node(), that.closest('.post').nextSibling)
-                    
                 })
         };
         console.log("RENDERING POSTS:", posts);
@@ -522,6 +534,10 @@ document.addEventListener("DOMContentLoaded", function() {
             .style('display', 'block')
         d3.select("#base_posted .owner")
             .attr('value', user)
+        d3.select('#base_posted .signature').text(users[user].signature);
+        d3.select('#base_posted .avatar').attr('src', users[user].avatar);
+        d3.select('#base_posted .title').text(users[user].title);
+        d3.select('#base_posted .nick').text(users[user].nick);
         d3.select("#base_posted .reply")
             .on("click", function() {
             var posted = this.closest('.post');
@@ -607,20 +623,19 @@ document.addEventListener("DOMContentLoaded", function() {
     <div class="post replyed" style="display: none" id="base_posted"> 
         <div class="header">
             <div class="miniprofile">
-                <img class="avatar" src="prophat.jpg" />
-                <div class="nick">DJ Tëstio!</div>
-                <div class="title">Victim</div>
+                <img class="avatar" src="" />
+                <div class="nick"></div>
+                <div class="title"></div>
             </div>
-            <input type="hidden" class="owner" value="djtëstio" />
+            <input type="hidden" class="owner" value="" />
             <input type="hidden" class="threadid" />
-            <input type="text" class="subject" value="subject_name_here" />
+            <input type="text" class="subject" value="" />
             <div class="lasted">Eventually now.</div>
             <div class="clearer"></div>
         </div>
         <textarea style="display: block" class="content"></textarea>
         <div class="footer">
-            <div class="signature">When one has much to put into them, a day has a hundred pockets 
- - Nietzche </div>
+            <div class="signature"></div>
             <div class="container">
                 <button class="reply">Reply</button>
             </div>

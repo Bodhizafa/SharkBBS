@@ -7,9 +7,6 @@ function (newDoc, oldDoc, userCtx, secObj) {
     log(oldDoc);
     log('->');
     log(newDoc);
-    if(newDoc._deleted) {
-        return true;
-    }
     if (newDoc.threadid === 'PRISMO') {
         throw 'Hey. What the fuck are you doing here?';
     }

@@ -38,7 +38,9 @@ echo "PUTTING PAGES"
 putstatic davenport prophat.jpg
 putstatic davenport sharkBBS.htm
 putdoc posts/_design/posts posts.json
+putdoc static/_design/static static.json
+putdoc posts/_security posts_sec.json
+putdoc static/_security static_sec.json
 putdoc _config/couch_httpd_auth/public_fields public_fields.json
 putdoc _config/couch_httpd_auth/users_db_public true.json
-putdoc _config/couch_httpd_auth/require_valid_user true.json
 putstatic davenport d3.js application/javascript

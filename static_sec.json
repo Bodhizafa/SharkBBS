@@ -1,0 +1,16 @@
+{
+   "_id": "_security",
+   "members": {
+       "names": [
+       ],
+       "roles": [
+       ]
+   },
+   "admins": {
+       "names": [
+       ],
+       "roles": [
+           "admin"
+       ]
+   }
+}

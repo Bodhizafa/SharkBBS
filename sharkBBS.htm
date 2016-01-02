@@ -5,14 +5,23 @@
 <script charset="utf-8" type="application/javascript" src="d3.js"></script>
 <style type="text/css">
 /*
- * ----------------------------------------------------------------------------
- * "THE BEER-WARE LICENSE" (Revision 42):
- * <meernik@live.com> wrote this file. As long as you retain this notice you
- * can do whatever you want with this stuff. If we meet some day, and you think
- * this stuff is worth it, you can buy me a beer in return 
- * - Landon
- * ----------------------------------------------------------------------------
- */
+ ----------------------------------------------------------------------------
+ "THE BEER-WARE LICENSE" (Revision 42):
+ <meernik@live.com> wrote this file. As long as you retain this notice you
+ can do whatever you want with this stuff. If we meet some day, and you think
+ this stuff is worth it, you can buy me a beer in return 
+ - Landon
+ ----------------------------------------------------------------------------
+*/
+
+/* 
+This is made up of 
+    cyan borders and text, 
+    orange bordered interactables, 
+    white user content, 
+    black background, 
+    and a dash of #222
+*/
 
 /* Overall Bullshit */
 body {
@@ -21,7 +30,7 @@ body {
     color: #0FF;
     margin: 0;
 }
-input,textarea,button {
+input,textarea,button,#topbar a {
     background-color: #222;
     border: 1pt solid orange; /* Good things are measured in points */
     color: orange;
@@ -29,6 +38,7 @@ input,textarea,button {
 }
 button {
     color: #0FF;
+    padding: 1pt 6pt;
 }
 .clearer {
     clear: both;
@@ -43,6 +53,18 @@ button {
     padding: 2pt;
     position: static;
     width:100%;
+    margin: 3pt 0 3pt 0;
+    padding-bottom: -1pt;
+    border-bottom: 1pt solid #0FF;
+}
+#topbar a {
+    text-decoration: none;
+    padding: 1pt 6pt;
+    color: #0FF;
+    margin-bottom: -4pt;
+}
+#topbar a.active {
+    border-color: #0FF;
 }
 .posts {
     margin: 0 5ex 0 5ex;
@@ -71,12 +93,12 @@ button {
     float: left;
 }
 /* Bullshit for posts */
-.signature {
+.post .signature {
     white-space: pre-wrap;
     padding: 6pt 3pt 6pt 3pt;
     font-size: 10pt;
 }
-.subject {
+.post .subject {
     font-size: 13pt;
     font-weight: bold;
     padding: 3pt;
@@ -274,7 +296,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         var username = row.id.replace('org.couchdb.user:', '')
                         users[username] = row.doc;
                     });
-                    renderThread(data);
+                    renderPosts(data);
                     d3.select('#base_posted .threadid').attr('value', new_threadid);
                 })
                 .header("Content-Type", "application/json")
@@ -371,7 +393,7 @@ document.addEventListener("DOMContentLoaded", function() {
             }
         },
 // Application - Metaphorically a picture of how data is metaphorically shaped on the backend
-        renderThread = function(posts) {
+        renderPosts = function(posts) {
         var $posts = d3.select("#posts").selectAll("div.post")
                     .data(posts, function(d) { return d._id;}),
             $npost = $posts.enter()
@@ -417,10 +439,8 @@ document.addEventListener("DOMContentLoaded", function() {
                         post = getPost(posted),
                         that = this;
                     d3.select(posted).classed("posted", true);
-                    if (posted.querySelector('.content').textContent) {
-                        posted.querySelector('.content')
-                            .outerHTML = '<textarea class="content">' + post.content + '</textarea>';
-                    }
+                    posted.querySelector('.content')
+                        .outerHTML = '<textarea class="content">' + post.content + '</textarea>';
                     posted.querySelector('.subject')
                         .outerHTML = '<input class="subject" value="' + post.subject + '" />';
                 });
@@ -468,11 +488,11 @@ document.addEventListener("DOMContentLoaded", function() {
                 });
             $post.select('.load')
                 .on('click', function() {
-                    window.location.hash = this.closest('.post').querySelector('._id').value;
+                    window.location.hash = "posts/" + this.closest('.post').querySelector('._id').value;
                 });
             $post.select('.unload')
                 .on('click', function() {
-                    window.location.hash = this.closest('.post').querySelector('.threadid').value;
+                    window.location.hash = "posts/" + this.closest('.post').querySelector('.threadid').value;
                 });
             $post.select('.interject')
                 .on('click', function(e) { 
@@ -548,100 +568,151 @@ document.addEventListener("DOMContentLoaded", function() {
             });
         });
     }
-    d3.select('#login').on('click', function() {
-        var username = this.closest('div').querySelector('.username').value,
-            password = this.closest('div').querySelector('.password').value;
-        d3.xhr(urls.session, function(response) {
-            if (response === null) {
-                console.error("Unsuccessful login");
-                alert("Unauthorized!");
-                return;
+    // I heard cool kids used hash routers
+    // When you navigate to page foo:
+    //   The element with class "page" and an ID that starts with foo are set display:block
+    //   Other elements with class "page" are hidden. (display:none)
+    //   The tab with href "#foo" is set class=active, others have it removed
+    //   The function foo in this map is called with the remaining path elements as arguments and #foo_page as this
+    var routes = {
+            "login": function() {
+                var $login_page = d3.select(this);
+                $login_page.select('button.login').on('click', function() {
+                    var username = $login_page.select('.username').property("value"),
+                        password = $login_page.select('.password').property("value");
+                    console.log("Attempting login as", username, password);
+                    d3.xhr(urls.session, function(response) {
+                        if (response === null) {
+                            console.error("Unsuccessful login");
+                            alert("Unauthorized!");
+                            return;
+                        }
+                        console.log("Successful login", response);
+                        user = username;
+                        window.location.hash = "posts/root";
+                    })
+                    .header("Content-Type", "application/json")
+                    .send("POST", JSON.stringify({
+                        "name": username, 
+                        "password": password}));
+                });
+                if (user) {
+                    d3.select(this).select(".loggedon").style("display", "block");
+                    d3.select(this).select(".user").text(user)
+                } else {
+                    d3.select(this).select(".loggedon").style("display", "none");
+                }
+            },
+            "register": function() {
+                
+            },
+            "posts": function(post) {
+                if (post) {
+                    loadThread(post);
+                }
+            },
+            "profile": function(username) {
+
             }
-            console.log("Successful login", response);
-            user = username;
-            d3.select("div.login").style('display', 'none');
-            // Hash routers are the way of the future
-            window.addEventListener('hashchange', function() {
-                loadThread(window.location.hash.slice(1));
-            });
-            if (window.location.hash) {
-                loadThread(window.location.hash.slice(1));
-            } else {
-                window.location.hash = 'root';
-            }
-        })
-        .header("Content-Type", "application/json")
-        .send("POST", JSON.stringify({
-            "name": username, 
-            "password": password}));
-    });
+        },
+        route = function(hash) {
+            var path_elements = hash.slice(1).split("/"),
+                page = path_elements.shift(),
+                page_elem = d3.select('#' + page + "_page")[0][0];
+            console.log("Navigating to", page, "(", path_elements, ")");
+            d3.selectAll('.page').
+                style("display", function(d) { return this.id.startsWith(page) ? "block" : "none"; });
+            d3.selectAll('#topbar a').
+                classed("active", function(d) { return this.href.slice(1).split("/")[0] == page; });
+            routes[page].apply(page_elem, path_elements);
+        };
+
+    window.addEventListener('hashchange', function() {route(window.location.hash)});
+    route(window.location.hash);
 });
+// TODO consistent formatting about 'var'
 </script>
 </head>
 <body>
 <div id="topbar">
-    <div class="login">
-        <span>Username:</span><input type="text" class="username" /><br />
-        <span>Password:</span><input type="password" class="password" /><br />
-        <button id="login">login</button>
-    </div>
+    <!-- It is assumed that hrefs of all these are hashes --!>
+    <a id="login_tab" href="#login">Login</a>
+    <a id="register_tab" href="#register">Register</a>
+    <a id="posts_tab" href="#posts">Posts</a>
+    <a id="profile_tab" href="#profile">Profile</a>
 </div>
-<div id="posts" class="posts">
-<!-- This gets filled out by D3 --!>
+<div id="login_page" class="page">
+    <p class="loggedon"><span>Currently logged in as:</span><span class="user" /></p>
+    <p><span>Username:</span><input type="text" class="username" /></p>
+    <p><span>Password:</span><input type="password" class="password" /></p>
+    <button class="login">login</button>
 </div>
-<div class="posts">
-    <div id="template" class="post">
-        <div class="header">
-            <div class="miniprofile">
-                <img src="/static/davenport/prophat.jpg" class="avatar">
-                <div class="nick">DJ Tëstio</div>
-                <div class="title">#E_REKT</div>
+<div id="register_page" class="page">
+    <p><span>Username (login and URL, immutable):</span><input type="text" class="username" /></p>
+    <p><span>Nick (display name, can be changed):</span><input type="text" class="nick" /></p>
+    <p><span>Signature (not required):</span><input type="text" class="signature" /></p>
+    <p><span>Image URL (not required):</span><input type="text" class="avatar" /></p>
+    <p><span>Password:</span><input type="password" class="password" /></p>
+    <p><span>Password:</span><input type="password" class="password2" /></p>
+    <button id="register">register</button>
+</div>
+<div id="posts_page" class="page">
+    <div id="posts" class="posts">
+    <!-- This gets filled out by D3 --!>
+    </div>
+    <div class="posts">
+        <div id="template" class="post">
+            <div class="header">
+                <div class="miniprofile">
+                    <img src="/static/davenport/prophat.jpg" class="avatar">
+                    <div class="nick">DJ Tëstio</div>
+                    <div class="title">#E_REKT</div>
+                </div>
+                <input type="hidden" class="_id" />
+                <input type="hidden" class="_rev" />
+                <input type="hidden" class="owner" />
+                <input type="hidden" class="threadid" />
+                <div class="subject">Imma loadin' some posts!</div>
+                <div class="lasted">2015-03-11T00:04:20.514Z</div>
+                <div class="clearer"></div>
             </div>
-            <input type="hidden" class="_id" />
-            <input type="hidden" class="_rev" />
-            <input type="hidden" class="owner" />
-            <input type="hidden" class="threadid" />
-            <div class="subject">Imma loadin' some posts!</div>
-            <div class="lasted">2015-03-11T00:04:20.514Z</div>
-            <div class="clearer"></div>
+            <div class="content">Post pictures of toast.</div>
+            <div class="footer">
+                <div class="signature"></div>
+                <div class="container">
+                    <button class="unload">Unload</button>
+                    <button class="edit">Edit</button>
+                    <button class="save">Save</button>
+                    <button class="cancel">Cancel</button>
+                    <button class="delete">Delete</button>
+                    <button class="load">Load</button>
+                    <button class="interject">Interject!</button>
+                    <button class="reply">Reply</button>
+                </div>
+            </div>
         </div>
-        <div class="content">Post pictures of toast.</div>
-        <div class="footer">
-            <div class="signature"></div>
-            <div class="container">
-                <button class="unload">Unload</button>
-                <button class="edit">Edit</button>
-                <button class="save">Save</button>
-                <button class="cancel">Cancel</button>
-                <button class="delete">Delete</button>
-                <button class="load">Load</button>
-                <button class="interject">Interject!</button>
-                <button class="reply">Reply</button>
+        <div class="post replyed" style="display: none" id="base_posted"> 
+            <div class="header">
+                <div class="miniprofile">
+                    <img class="avatar" src="" />
+                    <div class="nick"></div>
+                    <div class="title"></div>
+                </div>
+                <input type="hidden" class="owner" value="" />
+                <input type="hidden" class="threadid" />
+                <input type="text" class="subject" value="" />
+                <div class="lasted">Eventually now.</div>
+                <div class="clearer"></div>
+            </div>
+            <textarea style="display: block" class="content"></textarea>
+            <div class="footer">
+                <div class="signature"></div>
+                <div class="container">
+                    <button class="reply">Reply</button>
+                </div>
             </div>
         </div>
     </div>
-    <div class="post replyed" style="display: none" id="base_posted"> 
-        <div class="header">
-            <div class="miniprofile">
-                <img class="avatar" src="" />
-                <div class="nick"></div>
-                <div class="title"></div>
-            </div>
-            <input type="hidden" class="owner" value="" />
-            <input type="hidden" class="threadid" />
-            <input type="text" class="subject" value="" />
-            <div class="lasted">Eventually now.</div>
-            <div class="clearer"></div>
-        </div>
-        <textarea style="display: block" class="content"></textarea>
-        <div class="footer">
-            <div class="signature"></div>
-            <div class="container">
-                <button class="reply">Reply</button>
-            </div>
-        </div>
-    </div>
-</div>
 </div>
 </body>
 <script>

@@ -10,13 +10,7 @@ function (newDoc, oldDoc, userCtx, secObj) {
     if (newDoc.threadid === 'PRISMO') {
         throw 'Hey. What the fuck are you doing here?';
     }
-    if (!newDoc.owner) {
-        throw {forbidden: 'Must have an owner'};
-    }
     if (oldDoc !== null) {
-        if (newDoc.created !== oldDoc.created) {
-            throw {forbidden: 'Attempted to change post created'};
-        }
         if (oldDoc.owner !== userCtx.name) {
             var admin = false;
             userCtx.roles.forEach(function(role) { if (role === 'admin') admin = true; });
@@ -28,17 +22,25 @@ function (newDoc, oldDoc, userCtx, secObj) {
             }
         }
     }
-    if (isNaN(Date.parse(newDoc.created))) {
-        throw {forbidden: 'Created date is not a date'};
-    }
-    if (isNaN(Date.parse(newDoc.lasted))) {
-        throw {forbidden: 'Last edited is not a date'};
-    }
-    required_keys.forEach(function(key) {
-        if (!key in newDoc) {
-            throw {forbidden: 'Missing ' + key};
+    if (!newDoc._deleted) {
+        if (oldDoc != null && newDoc.created !== oldDoc.created) {
+            throw {forbidden: 'Attempted to change post created'};
         }
-    });
+        if (!newDoc.owner) {
+            throw {forbidden: 'Must have an owner'};
+        }
+        if (isNaN(Date.parse(newDoc.created))) {
+            throw {forbidden: 'Created date is not a date'};
+        }
+        if (isNaN(Date.parse(newDoc.lasted))) {
+            throw {forbidden: 'Last edited is not a date'};
+        }
+        required_keys.forEach(function(key) {
+            if (!key in newDoc) {
+                throw {forbidden: 'Missing ' + key};
+            }
+        });
+    }
     return true;
 }
     ",

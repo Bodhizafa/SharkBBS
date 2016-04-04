@@ -16,20 +16,21 @@ refresh: static config
 dbs: 
 	$(call CREATE_IF_NOT_EXISTS,static) 
 	$(call CREATE_IF_NOT_EXISTS,posts) 
-    
 
 config: dbs
 	$(call UPDATE_CONFIG,'"true"',couch_httpd_auth/users_db_public)
-	$(call UPDATE_CONFIG,'"nick$(,)title$(,)avatar$(,)signature"',couch_httpd_auth/users_db_public)
+	$(call UPDATE_CONFIG,'"nick$(,)title$(,)avatar$(,)signature"',couch_httpd_auth/public_fields)
 	cat posts.json | ./upload_document.sh $(BASEURL)/posts/_design/posts 
+	cat users.json | ./upload_document.sh $(BASEURL)/_users/_design/users 
 	cat posts_sec.json | ./upload_document.sh $(BASEURL)/posts/_security 
 	cat static.json | ./upload_document.sh $(BASEURL)/static/_design/static
 	cat static_sec.json | ./upload_document.sh $(BASEURL)/static/_security
 
 static: dbs
 	echo "{}" | ./upload_document.sh $(BASEURL)/static/sys 
-	./upload_attachment.sh $(BASEURL)/static/sys prophat.jpg image/jpeg
+	cat root.json| ./upload_document.sh $(BASEURL)/posts/root
 	./upload_attachment.sh $(BASEURL)/static/sys sharkBBS.htm text/html
+	./upload_attachment.sh $(BASEURL)/static/sys prophat.jpg image/jpeg
 	./upload_attachment.sh $(BASEURL)/static/sys d3.js application/javascript
 
 bulldoze:

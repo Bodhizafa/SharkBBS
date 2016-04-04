@@ -257,25 +257,78 @@ Reply2Int1 (OP)
 |-...
 <<<^ go up one level by loading OP's threadid
 */
-document.addEventListener("DOMContentLoaded", function() {
+var users = { // User data. Users missing these fields may not render correctly
+    "": { // Defaults
+        "nick": "",
+        "title": "",
+        "avatar": "",
+        "signature": ""
+    }
+}
+
 // DataModel - Metaphorically a picture of how data is literally shaped on the frontend.
+document.addEventListener("DOMContentLoaded", function() {
     var user = "", // Current logged in username (key in _users, without 'org.couchdb.user:')
+        primeUsers = (function(usernames, cb) {
+        // `usernames` should be an array without org.couchdb.user: cb will be invoked when they are all
+        // in `users`
+        var uncached_by_username = {},
+            log_cb = (function() {
+                console.debug("Primed users cache for ", usernames, "result: ", users);
+                cb();
+            });
+            usernames.forEach(function(username) {
+                if (!users[username]) {
+                    uncached_by_username["org.couchdb.user:" + username] = true;
+                }
+            });
+            if (Object.keys(uncached_by_username).length === 0) {
+                console.debug("Users cache hit");
+                log_cb();
+                return;
+            } 
+            d3.xhr(urls.users + "/_all_docs?include_docs=true", function(resp) {
+                var rows = JSON.parse(resp.response).rows;
+                rows.forEach(function(row) {
+                    var username = row.id.replace('org.couchdb.user:', '')
+                    users[username] = row.doc;
+                    // fill out defaults
+                    Object.keys(users[""]).forEach(function(key) {
+                        if (!users[username][key]) {
+                            users[username][key] = users[""][key];
+                        }
+                    });
+                });
+                log_cb();
+            })
+            .on("error", function(resp) {
+                console.error("Error priming users cache for ", usernames, ":", resp);
+                alert("SHIT POST!")
+            })
+            .header("Content-Type", "application/json")
+            .send("POST", JSON.stringify({"keys": Object.keys(uncached_by_username)}));
+        }),
         loadThread = (function(new_threadid) {
+        // This function works by making three requests. First it makes one for the OP and one for the replies at the same time.
+        // The results are then put into replies and interjections_by_parentid such that OP is first in replies.
+        // When requests reaches zero, actuallyLoadThread is called, it sorts and collates replies into `posts`,
+        // Then it compiles a list of usernames owning posts in the thread (which will be required to render), primes the users
+        // cache with them (the third request), and then calls renderPosts(posts)
         var replies = [],
             requests = 2, 
             interjections_by_parentid = {},
             actuallyLoadThread = function() { // Called when interjections_by_postid and replies are populated
-                var data = [],
-                    op = replies.shift(), // OP is always first
-                    uncached_by_username = {};  // users missing and needed from the cache
+                var posts = [],
+                    op = replies.shift(), // OP is shifted on, replies are pushed
+                    usernames = [user];  // users required to render the current thread (user is required to render replayed
                 replies.sort(function(a, b) { return d3.ascending(a.created, b.created) });
                 replies.unshift(op);
                 replies.forEach(function(reply) {
-                    data.push(reply);
+                    posts.push(reply);
                     if (interjections_by_parentid[reply._id]) {
                         interjections_by_parentid[reply._id].sort(function(a, b) { return d3.descending(a.lasted, b.lasted); })
                         interjections_by_parentid[reply._id].forEach(function(interjection) { 
-                            data.push(interjection);
+                            posts.push(interjection);
                         });
                         delete interjections_by_parentid[reply._id];
                     }
@@ -283,30 +336,27 @@ document.addEventListener("DOMContentLoaded", function() {
                 if (Object.keys(interjections_by_parentid).length) {
                     console.error("Orphaned posts: ", interjections_by_parentid);
                 }
-                // Prime the users cache, so when we try to render these posts, all the data is there
-                data.forEach(function(post) {
-                    if (users[post.owner] === undefined) {
-                        uncached_by_username['org.couchdb.user:' + post.owner] = true;
-                    }
+                // Prime the users cache
+                posts.forEach(function(post) {
+                    usernames.push(post.owner);
                 })
-                uncached_by_username = Object.keys(uncached_by_username);
-                d3.xhr(urls.users + "/_all_docs?include_docs=true", function(resp) {
-                    var rows = JSON.parse(resp.response).rows;
-                    rows.forEach(function(row) {
-                        var username = row.id.replace('org.couchdb.user:', '')
-                        users[username] = row.doc;
-                    });
-                    renderPosts(data);
-                    d3.select('#base_posted .threadid').attr('value', new_threadid);
-                })
-                .header("Content-Type", "application/json")
-                .send("POST", JSON.stringify({"keys": uncached_by_username}))
+                console.debug("Collated posts: ", posts);
+                primeUsers(usernames, function() { 
+                    renderPosts(posts); 
+                    d3.select('#base_posted .threadid').attr('value', new_threadid); // XXX should this be property?
+                });
             };
+        console.debug("Loading thread ", new_threadid, "as user", user);
+        if (!user) {
+            alert("Login first.");
+            window.location.hash = "login";
+            return;
+        };
         // Get the OP
         d3.json(urls.posts + '/' + new_threadid, function(d) {
             console.log("Found OP")
             d.cssclass = 'op';
-            replies.push(d);
+            replies.unshift(d);
             if (--requests == 0) {
                 actuallyLoadThread();
             }
@@ -428,10 +478,12 @@ document.addEventListener("DOMContentLoaded", function() {
                 .style('display', function(d) {
                     return d.content ? null : "none";
                 });
+            /*
             $post.select('.signature')
                 .style('display', function(d) {
                     return d.signature ? null : "none";
                 });
+            */
             $post.select('.edit')
                 .on('click', function () {
                     // Clicked "edit"
@@ -558,13 +610,13 @@ document.addEventListener("DOMContentLoaded", function() {
         d3.select('#base_posted .avatar').attr('src', users[user].avatar);
         d3.select('#base_posted .title').text(users[user].title);
         d3.select('#base_posted .nick').text(users[user].nick);
-        d3.select("#base_posted .reply")
-            .on("click", function() {
+        d3.select('#base_posted .reply')
+            .on('click', function() {
             var posted = this.closest('.post');
             var post = getPost(posted);
             postPost(post, function() {
                 loadThread(post.threadid);
-                posted.querySelector('.content').value = "";
+                posted.querySelector('.content').value = '';
             });
         });
     }
@@ -575,56 +627,166 @@ document.addEventListener("DOMContentLoaded", function() {
     //   The tab with href "#foo" is set class=active, others have it removed
     //   The function foo in this map is called with the remaining path elements as arguments and #foo_page as this
     var routes = {
-            "login": function() {
+            'login': function() {
                 var $login_page = d3.select(this);
                 $login_page.select('button.login').on('click', function() {
-                    var username = $login_page.select('.username').property("value"),
-                        password = $login_page.select('.password').property("value");
-                    console.log("Attempting login as", username, password);
+                    var username = $login_page.select('.username').property('value'),
+                        password = $login_page.select('.password').property('value');
+                    console.log('Attempting login as', username, password);
                     d3.xhr(urls.session, function(response) {
                         if (response === null) {
-                            console.error("Unsuccessful login");
-                            alert("Unauthorized!");
+                            console.error('Unsuccessful login');
+                            alert('Unauthorized!');
                             return;
                         }
-                        console.log("Successful login", response);
+                        console.log('Successful login', response);
                         user = username;
-                        window.location.hash = "posts/root";
+                        window.location.hash = 'posts/root';
                     })
-                    .header("Content-Type", "application/json")
-                    .send("POST", JSON.stringify({
-                        "name": username, 
-                        "password": password}));
+                    .header('Content-Type', 'application/json')
+                    .send('POST', JSON.stringify({
+                        'name': username, 
+                        'password': password}));
                 });
                 if (user) {
-                    d3.select(this).select(".loggedon").style("display", "block");
-                    d3.select(this).select(".user").text(user)
+                    d3.select(this).select('.loggedon').style('display', 'block');
+                    d3.select(this).select('.user').text(user)
                 } else {
-                    d3.select(this).select(".loggedon").style("display", "none");
+                    d3.select(this).select('.loggedon').style('display', 'none');
                 }
             },
-            "register": function() {
-                
+            'register': function() {
+                var $register_page = d3.select(this);
+                $register_page.select('button.register').on('click', function() {
+                    var username = $register_page.select('input.username').property('value'),
+                        nick = $register_page.select('input.nick').property('value'),
+                        signature = $register_page.select('input.signature').property('value'),
+                        avatar = $register_page.select('input.avatar').property('value'),
+                        password = $register_page.select('input.password').property('value'),
+                        password2 = $register_page.select('input.password2').property('value');
+
+                    if (password != password2) {
+                        alert('Passwords do not match');
+                        return;
+                    }
+                    if (!username.match(/^\w+$/)) {
+                        alert('Username is not a word');
+                        return;
+                    }
+                    d3.xhr(urls.users + '/' + encodeURIComponent('org.couchdb.user:' + username))
+                    .on('load', function(resp) {
+                        if (resp.status != 201) {
+                            alert('SHIT POST ', + resp.status);
+                            console.error('Non-201 response', resp);
+                        }
+                        console.debug('Registered user: ', resp);
+                        d3.xhr(urls.session, function(response) {
+                            if (response === null) {
+                                console.error('Unsuccessful login');
+                                alert('Unauthorized!');
+                                return;
+                            }
+                            alert('Registered ' + username + '. :D');
+                            user = username;
+                            window.location.hash = 'posts/root';
+                        })
+                        .on('error', function(response) {
+                            console.error("Couldn't log in after creating user", username, response);
+                            alert('SHIT POST!')
+                        })
+                        .header('Content-Type', 'application/json')
+                        .send('POST', JSON.stringify({
+                            'name': username, 
+                            'password': password}));
+                    })
+                    .on('error', function(resp) {
+                        alert('SHIT POST ' + resp.status);
+                        console.error('Something bad happened', resp);
+                    })
+                    .header('Content-Type', 'application/json')
+                    .send('PUT', JSON.stringify({
+                        '_id': 'org.couchdb.user:' + username,
+                        'name': username,
+                        'type': 'user',
+                        'roles': [],
+                        'password': password,
+                        'nick': nick,
+                        'signature': signature,
+                        'avatar': avatar,
+                    }));
+
+                });
             },
-            "posts": function(post) {
+            'posts': function(post) {
                 if (post) {
                     loadThread(post);
+                } else {
+                    window.location.hash = 'posts/root';
+                    return;
                 }
             },
-            "profile": function(username) {
+            'profile': function(username) {
+                var $profile_page = d3.select(this);
+                if (!username) {
+                    if (!user) {
+                        alert('Login first.');
+                        window.location.hash = 'login';
+                        return;
+                    }
+                    window.location.hash = 'profile/' + user;
+                    return;
+                }
+                console.debug('Loading profile for: ', username);
+                primeUsers([username], function() {
+                    // Damnit, HTML, why is there no consistent "the thing I'm displaying" property/attr/css
+                    $profile_page.select('input.username').property('value', username);
+                    $profile_page.select('span.username').text(username);
+                    $profile_page.select('input.nick').property('value', users[username].nick);
+                    $profile_page.select('span.nick').text(users[username.nick]);
+                    $profile_page.select('img.avatar').attr('src', users[username].avatar);
+                    $profile_page.select('input.avatar').property("value", users[username].avatar);
+                    $profile_page.select('span.avatar').text(users[username].avatar);
+                    $profile_page.select('textarea.signature').property('value', users[username].signature);
+                    $profile_page.select('div.signature').text(users[username].signature);
 
+                    $profile_page.select('input').style('display', user == username ? 'inline' : 'none');
+                    $profile_page.select('textarea').style('display', user == username ? 'inline' : 'none');
+                    $profile_page.select('span').style('display', user == username ? 'none' : 'inline');
+                    $profile_page.select('div').style('display', user == username ? 'none' : 'inline');
+
+                    $profile_page.select('button.save').style('display', user == username ? 'inline' : 'none')
+                    .on('click', function() {
+                        var fields = {
+                            'nick': $profile_page.select('input.nick').property('value'),
+                            'avatar': $profile_page.select('input.avatar').property('value'),
+                            'signature': $profile_page.select('textarea.signature').property('value')
+                            }
+                        console.log("saving some bullshit", fields);
+                        // TODO write this
+                    });
+                    console.debug("Rendered profile for", username);
+                });
+            },
+            "help": function() {
+                // This doesn't actually need to do anything
             }
         },
         route = function(hash) {
             var path_elements = hash.slice(1).split("/"),
                 page = path_elements.shift(),
                 page_elem = d3.select('#' + page + "_page")[0][0];
-            console.log("Navigating to", page, "(", path_elements, ")");
-            d3.selectAll('.page').
-                style("display", function(d) { return this.id.startsWith(page) ? "block" : "none"; });
-            d3.selectAll('#topbar a').
-                classed("active", function(d) { return this.href.slice(1).split("/")[0] == page; });
-            routes[page].apply(page_elem, path_elements);
+            console.debug("Navigating to", page, "(", path_elements, ")");
+            if (page) {
+                d3.selectAll('.page').
+                    style("display", function(d) { return this.id.startsWith(page) ? "block" : "none"; });
+                d3.selectAll('#topbar a').
+                    classed("active", function(d) { return this.href.slice(1).split("/")[0] == page; });
+                routes[page].apply(page_elem, path_elements);
+            } else { // Did you really want to navigate to nowhere?
+                console.log("hash", hash, "appears to go nowhere");
+                d3.selectAll('.page').style("display", "none");
+                d3.selectAll('#topbar a').classed("active", false);
+            }
         };
 
     window.addEventListener('hashchange', function() {route(window.location.hash)});
@@ -640,6 +802,7 @@ document.addEventListener("DOMContentLoaded", function() {
     <a id="register_tab" href="#register">Register</a>
     <a id="posts_tab" href="#posts">Posts</a>
     <a id="profile_tab" href="#profile">Profile</a>
+    <a id="help_tab" href="#help">Help</a>
 </div>
 <div id="login_page" class="page">
     <p class="loggedon"><span>Currently logged in as:</span><span class="user" /></p>
@@ -654,7 +817,7 @@ document.addEventListener("DOMContentLoaded", function() {
     <p><span>Image URL (not required):</span><input type="text" class="avatar" /></p>
     <p><span>Password:</span><input type="password" class="password" /></p>
     <p><span>Password:</span><input type="password" class="password2" /></p>
-    <button id="register">register</button>
+    <button class="register">register</button>
 </div>
 <div id="posts_page" class="page">
     <div id="posts" class="posts">
@@ -664,7 +827,7 @@ document.addEventListener("DOMContentLoaded", function() {
         <div id="template" class="post">
             <div class="header">
                 <div class="miniprofile">
-                    <img src="/static/davenport/prophat.jpg" class="avatar">
+                    <img src="/static/sys/prophat.jpg" class="avatar">
                     <div class="nick">DJ Tëstio</div>
                     <div class="title">#E_REKT</div>
                 </div>
@@ -714,6 +877,30 @@ document.addEventListener("DOMContentLoaded", function() {
         </div>
     </div>
 </div>
+<div id="profile_page" class="page">
+    <table>
+        <tr>
+            <td class="label">username</td>
+            <td><input class="username" disabled /><span class="username"></span></td>
+        </tr>
+        <tr>
+            <td class="label">nick</td>
+            <td><input class="nick" /><span class="nick"></span></td>
+        </tr>
+        <tr>
+            <td class="label">avatar</td>
+            <td><img class="avatar" /><span class="avatar"></span><input class="avatar" /></td>
+        </tr>
+        <tr>
+            <td class="label">signature</td>
+            <td><textarea class="signature"></textarea><div class="signature"></span></td>
+        </tr>
+    </table>
+    <button class="save">Save</button>
+</div>
+<div id="help_page" class="page">
+    Ha. You expected there to be something here?
+</div>
 </body>
 <script>
 "use strict";
@@ -726,14 +913,6 @@ var urls = {
     "post": "/posts/_design/posts/_update/post",
     "session": "/_session",
     "users": "/_users"
-}
-var users = { // Cache of user data, primed by actuallyLoadThread()
-    "djtëstio": { 
-        "nick": "DJ Tëstio",
-        "title": "Data Victim",
-        "avatar": "/static/davenport/prophat.jpg",
-        "signature": "When one has much to put into them, a day has a hundred pockets.\n\t-Nietzche"
-    }
 }
 
 // Utilities

@@ -4,6 +4,11 @@
 function (newDoc, oldDoc, userCtx, secObj) {
     var required_keys = ['owner', 'renderer', 'content', 'lasted', 'created', 'subject', 'threadid', 'signature'];
     log('UPDATE VALIDATIN');
+    log('userCtx');
+    log(userCtx);
+    log('secObj');
+    log(secObj);
+    log('Documents');
     log(oldDoc);
     log('->');
     log(newDoc);

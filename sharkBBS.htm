@@ -48,6 +48,9 @@ button {
 #template {
     display: none;
 }
+input[type="test"]:disabled {
+    background: #000;
+}
 /* Bullshit for static elements and containers */
 #topbar {
     padding: 2pt;
@@ -76,6 +79,7 @@ button {
 /* Bullshit for Users and Profiles */
 .miniprofile .nick {
     font-size: 14pt;
+    color: #0FF;
     vertical-align: middle;
     display: inline-block;
 }
@@ -85,7 +89,7 @@ button {
     border-radius: 3pt;
     display: inline-block;
 }
-.miniprofile .avatar {
+img.avatar {
     vertical-align: middle;
     width: 32pt;
     height: 32pt;
@@ -271,17 +275,38 @@ document.addEventListener("DOMContentLoaded", function() {
     var user = "", // Current logged in username (key in _users, without 'org.couchdb.user:')
         primeUsers = (function(usernames, cb) {
         // `usernames` should be an array without org.couchdb.user: cb will be invoked when they are all
-        // in `users`
+        // in `users` Sometimes this needs two parallel requests because in couchdb, requesting all_docs
+        // doesn't actually give you the same document as requesting it directly would in the case
+        // of asking for your own users document, and we need some non-public fields on users[user] so we can
+        // update the profile, so we get that one differently.
         var uncached_by_username = {},
+            requests = 1,
             log_cb = (function() {
-                console.debug("Primed users cache for ", usernames, "result: ", users);
-                cb();
+                requests--;
+                if (requests == 0) {
+                    console.debug("Primed users cache for ", usernames, "as", user, "result: ", users);
+                    cb();
+                }
             });
+            console.log("Priming usrs cache, cookie:", document.cookie);
+            // Build a list of users we don't have in 'users,' then make a request if there actually are any
             usernames.forEach(function(username) {
                 if (!users[username]) {
                     uncached_by_username["org.couchdb.user:" + username] = true;
                 }
             });
+            if (uncached_by_username["org.couchdb.user:" + user]) {
+                requests = requests + 1;
+                delete uncached_by_username['org.couchdb.user:' + user];
+                d3.json(urls.users + '/' + encodeURIComponent('org.couchdb.user:' + user),  function(d) {
+                    users[user] = d;
+                    console.debug("Primed cache for logged in user", d);
+                    if (!d.password_scheme) {
+                        console.error("Did not get full user doc for ", user);
+                    }
+                    log_cb();
+                });
+            }
             if (Object.keys(uncached_by_username).length === 0) {
                 console.debug("Users cache hit");
                 log_cb();
@@ -290,8 +315,14 @@ document.addEventListener("DOMContentLoaded", function() {
             d3.xhr(urls.users + "/_all_docs?include_docs=true", function(resp) {
                 var rows = JSON.parse(resp.response).rows;
                 rows.forEach(function(row) {
-                    var username = row.id.replace('org.couchdb.user:', '')
+                    var username;
+                    if (row.error) {
+                        console.error("Error finding user ", username, ":", row);
+                        alert("SHIT POST")
+                    }
+                    username = row.id.replace('org.couchdb.user:', '')
                     users[username] = row.doc;
+                    users[username]._rev = row.value.rev;
                     // fill out defaults
                     Object.keys(users[""]).forEach(function(key) {
                         if (!users[username][key]) {
@@ -467,10 +498,13 @@ document.addEventListener("DOMContentLoaded", function() {
                 $field.attr('value', func);
                 $field.text(func);
             });
+            $post.select('.nick').attr('href', function(d) {
+                return '#profile/' + d.owner;
+            });
             $post.attr('class', function(d) { 
                 if (d.cssclass) return 'post ' + d.cssclass; 
                 else return 'post';
-            }),
+            });
             $post.classed('mine', function(d) {
                 return d.owner == user;
             });
@@ -641,7 +675,14 @@ document.addEventListener("DOMContentLoaded", function() {
                         }
                         console.log('Successful login', response);
                         user = username;
-                        window.location.hash = 'posts/root';
+                        if (users[user]) {
+                            delete users[user]
+                            primeUsers([user], function() {
+                                window.location.hash = 'posts/root';
+                            });
+                        } else {
+                            window.location.hash = 'posts/root';
+                        }
                     })
                     .header('Content-Type', 'application/json')
                     .send('POST', JSON.stringify({
@@ -650,7 +691,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 });
                 if (user) {
                     d3.select(this).select('.loggedon').style('display', 'block');
-                    d3.select(this).select('.user').text(user)
+                    d3.select(this).select('.user').text(user);
                 } else {
                     d3.select(this).select('.loggedon').style('display', 'none');
                 }
@@ -742,27 +783,73 @@ document.addEventListener("DOMContentLoaded", function() {
                     $profile_page.select('input.username').property('value', username);
                     $profile_page.select('span.username').text(username);
                     $profile_page.select('input.nick').property('value', users[username].nick);
-                    $profile_page.select('span.nick').text(users[username.nick]);
+                    $profile_page.select('span.nick').text(users[username].nick);
                     $profile_page.select('img.avatar').attr('src', users[username].avatar);
                     $profile_page.select('input.avatar').property("value", users[username].avatar);
-                    $profile_page.select('span.avatar').text(users[username].avatar);
                     $profile_page.select('textarea.signature').property('value', users[username].signature);
                     $profile_page.select('div.signature').text(users[username].signature);
+                    $profile_page.select('input.password').property('value', "");
+                    $profile_page.select('input.password2').property('value', "");
 
-                    $profile_page.select('input').style('display', user == username ? 'inline' : 'none');
-                    $profile_page.select('textarea').style('display', user == username ? 'inline' : 'none');
-                    $profile_page.select('span').style('display', user == username ? 'none' : 'inline');
-                    $profile_page.select('div').style('display', user == username ? 'none' : 'inline');
+                    $profile_page.selectAll('tr.password').style('display', user == username ? '' : 'none');
+                    $profile_page.selectAll('input').style('display', user == username ? 'inline' : 'none');
+                    $profile_page.selectAll('textarea').style('display', user == username ? 'inline' : 'none');
+                    $profile_page.selectAll('span').style('display', user == username ? 'none' : 'inline');
+                    $profile_page.selectAll('div').style('display', user == username ? 'none' : 'inline');
 
                     $profile_page.select('button.save').style('display', user == username ? 'inline' : 'none')
                     .on('click', function() {
                         var fields = {
+                            'type': 'user',
                             'nick': $profile_page.select('input.nick').property('value'),
                             'avatar': $profile_page.select('input.avatar').property('value'),
-                            'signature': $profile_page.select('textarea.signature').property('value')
+                            'signature': $profile_page.select('textarea.signature').property('value'),
+                            'password': $profile_page.select('input.password2').property('value')
+                            },
+                            inherited_fields = ['_rev', '_id', 'roles', 'name'],
+                            password_fields = ['derived_key', 'salt', 'iterations', 'password_scheme'],
+                            invalidate_session = true;
+                        
+                        if (fields.password != $profile_page.select('input.password').property('value')) {
+                            alert("Passwords don't match.");
+                            return
+                        }
+                        if (!fields.password) { // If there's no password change, pass through the old password fields 
+                            delete fields.password;
+                            inherited_fields = inherited_fields.concat(password_fields);
+                            invalidate_session = false;
+                        } 
+                        inherited_fields.forEach(function(key) {
+                            fields[key] = users[user][key];
+                        });
+                        console.debug("Updating user", user, "to", fields);
+                        d3.xhr(urls.users + '/' + encodeURIComponent('org.couchdb.user:' + user))
+                        .on('load', function(resp) {
+                            delete users[username]; 
+                            if (invalidate_session) {
+                                d3.xhr(urls.session)
+                                .on('load', function(resp) {
+                                    if (!user) {
+                                        alert("SHIT POST")
+                                        throw "Seriously how did you get here?";
+                                    }
+                                    delete users[user];
+                                    user = "";
+                                    alert("Password changed, please relogin");
+                                    window.location.hash = "login";
+                                })
+                                .send("DELETE");
+                            } else {
+                                alert("Updated!");
+                                window.location.hash = "profile";
                             }
-                        console.log("saving some bullshit", fields);
-                        // TODO write this
+                        })
+                        .on('error', function(resp) {
+                            console.error("User update failed", resp);
+                            alert("SHIT POST");
+                        })
+                        .header('Content-Type', 'application/json')
+                        .send('PUT', JSON.stringify(fields));
                     });
                     console.debug("Rendered profile for", username);
                 });
@@ -828,7 +915,7 @@ document.addEventListener("DOMContentLoaded", function() {
             <div class="header">
                 <div class="miniprofile">
                     <img src="/static/sys/prophat.jpg" class="avatar">
-                    <div class="nick">DJ Tëstio</div>
+                    <a class="nick" href="#profile">DJ Tëstio</a>
                     <div class="title">#E_REKT</div>
                 </div>
                 <input type="hidden" class="_id" />
@@ -881,19 +968,27 @@ document.addEventListener("DOMContentLoaded", function() {
     <table>
         <tr>
             <td class="label">username</td>
-            <td><input class="username" disabled /><span class="username"></span></td>
+            <td><input class="username" type="text" disabled /><span class="username"></span></td>
         </tr>
         <tr>
             <td class="label">nick</td>
-            <td><input class="nick" /><span class="nick"></span></td>
+            <td><input class="nick" type="text"/><span class="nick"></span></td>
         </tr>
         <tr>
             <td class="label">avatar</td>
-            <td><img class="avatar" /><span class="avatar"></span><input class="avatar" /></td>
+            <td><img class="avatar" /><input class="avatar" type="text"/></td>
         </tr>
         <tr>
             <td class="label">signature</td>
             <td><textarea class="signature"></textarea><div class="signature"></span></td>
+        </tr>
+        <tr class="password">
+            <td class="password">password</td>
+            <td><input class="password" type="password" /><span class="password"></span></td>
+        </tr>
+        <tr class="password">
+            <td class="password2">password(again to change)</td>
+            <td><input class="password2" type="password" /><span class="password"></span></td>
         </tr>
     </table>
     <button class="save">Save</button>
@@ -908,7 +1003,6 @@ document.addEventListener("DOMContentLoaded", function() {
 var urls = {
     "posts": "/posts",
     "uuids": "/_uuids",
-    "changes": "/posts/_changes",
     "thread": "/posts/_design/posts/_view/thread",
     "post": "/posts/_design/posts/_update/post",
     "session": "/_session",

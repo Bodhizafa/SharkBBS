@@ -1,4 +1,4 @@
-HOST=localhost:5984
+HOST=10.1.10.10:5984
 USER=root
 PASSWORD=berfberfberfberf
 BASEURL=http://$(USER):$(PASSWORD)@$(HOST)
@@ -24,7 +24,8 @@ config: dbs
 	cat users.json | ./upload_document.sh $(BASEURL)/_users/_design/users 
 	cat posts_sec.json | ./upload_document.sh $(BASEURL)/posts/_security 
 	cat static.json | ./upload_document.sh $(BASEURL)/static/_design/static
-	cat static_sec.json | ./upload_document.sh $(BASEURL)/static/_security
+	cat empty_sec.json | ./upload_document.sh $(BASEURL)/static/_security
+	cat empty_sec.json | ./upload_document.sh $(BASEURL)/_users/_security
 
 static: dbs
 	echo "{}" | ./upload_document.sh $(BASEURL)/static/sys 

@@ -29,6 +29,7 @@ body {
     background-color: black;
     color: #0FF;
     margin: 0;
+    padding-bottom: 10pt;
 }
 input,textarea,button,#topbar a {
     background-color: #222;
@@ -231,6 +232,11 @@ img.avatar {
 }
 .post.mine .delete {
     display: initial;
+}
+/* Other bullshit */
+textarea.help {
+    max-width: 120ex;
+    width: 100%;
 }
 </style>
 <title>Couchlocked...</title>
@@ -474,6 +480,11 @@ document.addEventListener("DOMContentLoaded", function() {
             }
         },
 // Application - Metaphorically a picture of how data is metaphorically shaped on the backend
+        renderMarkdown = function($target, source) {
+            // TODO write this
+            $target.text(source)
+            return
+        },
         renderPosts = function(posts) {
         var $posts = d3.select("#posts").selectAll("div.post")
                     .data(posts, function(d) { return d._id;}),
@@ -855,7 +866,12 @@ document.addEventListener("DOMContentLoaded", function() {
                 });
             },
             "help": function() {
-                // This doesn't actually need to do anything
+                var $help_page = d3.select(this)
+                $help_page.select('button.render')
+                .on('click', function() {
+                    renderMarkdown($help_page.select('div.help'), 
+                                   $help_page.select('textarea.help').property('value'));
+                })
             }
         },
         route = function(hash) {
@@ -994,7 +1010,14 @@ document.addEventListener("DOMContentLoaded", function() {
     <button class="save">Save</button>
 </div>
 <div id="help_page" class="page">
-    Ha. You expected there to be something here?
+    <div class="help"></div>
+    <br />
+    <hr />
+    <textarea class="help">
+    Press "render" below to see what this box would look like as a post
+    </textarea>
+    <br />
+    <button class="render">Render</button>
 </div>
 </body>
 <script>

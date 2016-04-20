@@ -237,6 +237,7 @@ img.avatar {
 textarea.help {
     max-width: 120ex;
     width: 100%;
+    height: 30em;
 }
 </style>
 <title>Couchlocked...</title>
@@ -267,7 +268,7 @@ Reply2Int1 (OP)
 |-...
 <<<^ go up one level by loading OP's threadid
 */
-var users = { // User data. Users missing these fields may not render correctly
+var users = { // User data. Users missing these fields may not render correctly there may however be more, because #schemaless
     "": { // Defaults
         "nick": "",
         "title": "",
@@ -480,10 +481,84 @@ document.addEventListener("DOMContentLoaded", function() {
             }
         },
 // Application - Metaphorically a picture of how data is metaphorically shaped on the backend
-        renderMarkdown = function($target, source) {
-            // TODO write this
-            $target.text(source)
-            return
+        format = function(source) {
+            // return a 'div' DOM element representing "source" rendered according to the semantics of this function.
+            var elem = document.createElement('div'),
+                // tokens which can have formatting semantics. They'll show up in the token stream as strings
+                formatting_tokens = ['__', '~~', '**', '//', '>', '*', '\n'],
+                grammar = {/*
+                    <block> ::= <block> <block> | <text> | <list> | <quote>
+                    <text> ::= <text> <text> | <span> \n 
+                    <span> ::= <span> <span> | <content> | <underlinetext> | <strikethroughtext> | <boldtext> | <italicstext>
+                    <underlinetext> ::= __ <span> __ 
+                    <strikethroughtext> ::= ~~ <span> ~~ 
+                    <boldtext> ::= ** <span> ** 
+                    <italicstext> := // <span> // 
+                    <list> ::= <listitem> | <listitem> <list>
+                    <listitem> ::= * <span> \n
+                    <quote> ::= <quoteitem> | <quoteitem> <quote>
+                    <quoteitem> ::= > <span> \n
+                    <content> ::= words and spaces
+                function() {
+                    var block, text, line, span, underlinetext, strikethroughtext, boldtext, italicstext, list, listitem, quote, quoteitem, content;
+                    document = run(block);
+                    block = or(text, list, quote);
+                    text = run(adjacent(run(span), '\n'));
+                    span ::= or(content, underlinetext, strikethroughtext, boldtext, italicstext);
+                    underlinetext = adjacent('__', span, '__');
+                    strikethroughtext = adjacent('~~', span, '~~');
+                    boldtext = adjacent('**', span, '**');
+                    italicstext = adjacent('//', span, '//');
+                    list = run(listitem);
+                    listitem = adjacent('*', content, '\n');
+
+                }
+                */}
+                token_stream = (function() {
+                var tokens = [],
+                    current_token = [], // Use arrays of characters because you can't decorate normal strings
+                                        // Tokens other than runs of text are still normal strings.
+                    skip = 1, 
+                    matched = false,
+                    stream_pos = 0;
+                    
+                    for (var pos = 0; pos < source.length; pos += skip) {
+                        matched = false;
+                        formatting_tokens.forEach(function(t) {
+                            if (matched) {
+                                return;
+                            }
+                            if (source.substr(pos, t.length) == t) {
+                                current_token.is_content = true; // this token is user content, not formatting metadata
+                                tokens.push(current_token);
+                                current_token = [];
+                                tokens.push(t);
+                                skip = t.length;
+                                matched = true;
+                            }
+                        })
+                        if (!matched) {
+                            current_token.push(source[pos])
+                            skip = 1;
+                        }
+                    }
+                    if (current_token) {
+                        current_token.is_content = true;
+                        tokens.push(current_token);
+                    }
+                    console.log("Tokenized into ", tokens);
+                    return {
+                        "read": function(n) {
+                            return tokstream.slice(stream_pos, stream_pos + n);
+                        },
+                        "advance": function(n) {
+                            stream_pos += n;
+                        }
+                    }
+                })();
+            
+            elem.textContent = source;
+            return elem;
         },
         renderPosts = function(posts) {
         var $posts = d3.select("#posts").selectAll("div.post")
@@ -495,147 +570,147 @@ document.addEventListener("DOMContentLoaded", function() {
             // Set text, value, and src of elements with these classes to their corresponding data.
             var fields = ['_rev', '_id', 'owner', 'subject', 'lasted', 'content', 'signature', 'threadid'],
                 ownerFields = ['avatar', 'nick', 'title'];
-            fields.forEach(function(field) {
-                var $field = $post.select('.' + field),
-                    func = (function(d) { return d[field]; });
-                $field.attr('src', func);
-                $field.attr('value', func);
-                $field.text(func);
-            });
-            ownerFields.forEach(function(field) {
-                var $field = $post.select('.' + field),
-                    func = (function(d) { return users[d.owner][field]; });
-                $field.attr('src', func);
-                $field.attr('value', func);
-                $field.text(func);
-            });
-            $post.select('.nick').attr('href', function(d) {
-                return '#profile/' + d.owner;
-            });
-            $post.attr('class', function(d) { 
-                if (d.cssclass) return 'post ' + d.cssclass; 
-                else return 'post';
-            });
-            $post.classed('mine', function(d) {
-                return d.owner == user;
-            });
-            $post.select('.content')
-                .style('display', function(d) {
-                    return d.content ? null : "none";
+                fields.forEach(function(field) {
+                    var $field = $post.select('.' + field),
+                        func = (function(d) { return d[field]; });
+                    $field.attr('src', func);
+                    $field.attr('value', func);
+                    $field.text(func);
                 });
-            /*
-            $post.select('.signature')
-                .style('display', function(d) {
-                    return d.signature ? null : "none";
+                ownerFields.forEach(function(field) {
+                    var $field = $post.select('.' + field),
+                        func = (function(d) { return users[d.owner][field]; });
+                    $field.attr('src', func);
+                    $field.attr('value', func);
+                    $field.text(func);
                 });
-            */
-            $post.select('.edit')
-                .on('click', function () {
-                    // Clicked "edit"
-                    var posted = this.closest('.post'),
-                        post = getPost(posted),
-                        that = this;
-                    d3.select(posted).classed("posted", true);
-                    posted.querySelector('.content')
-                        .outerHTML = '<textarea class="content">' + post.content + '</textarea>';
-                    posted.querySelector('.subject')
-                        .outerHTML = '<input class="subject" value="' + post.subject + '" />';
+                $post.select('.nick').attr('href', function(d) {
+                    return '#profile/' + d.owner;
                 });
-            $post.select('.cancel')
-                .on('click', function () {
-                    var posted = this.closest('.post'),
-                        thread = this.closest('.post').querySelector('.threadid').value;
-                    d3.select(posted).classed("posted", false);
-                    posted.querySelector('.subject')
-                        .outerHTML = '<div class="subject"></div>';
-                    posted.querySelector('.content')
-                        .outerHTML = '<div class="content"></div>';
-                    loadThread(thread);
+                $post.attr('class', function(d) { 
+                    if (d.cssclass) return 'post ' + d.cssclass; 
+                    else return 'post';
                 });
-            $post.select('.save')
-                .on('click', function () {
-                    var posted = this.closest('.post'),
-                        post = getPost(posted), // XXX NO DATE
-                        thread = d3.select('#base_posted .threadid').attr('value');
-                    console.log("Saving..");
-                    postPost(post, function() {
-                            // Post has been saved, unhide buttons, 
-                            d3.select(posted).classed("posted", false);
-                            posted.querySelector('.subject')
-                                .outerHTML = '<div class="subject"></div>';
-                            posted.querySelector('.content')
-                                .outerHTML = '<div class="content">loading...</div>';
-                            loadThread(thread);
+                $post.classed('mine', function(d) {
+                    return d.owner == user;
+                });
+                $post.select('.content')
+                    .style('display', function(d) {
+                        return d.content ? null : "none";
                     });
-                });
-            $post.select('.delete')
-                .on('click', function() {
-                    var id = this.closest('.post').querySelector('._id').value,
-                        rev = this.closest('.post').querySelector('._rev').value,
-                        thread = this.closest('.post').querySelector('.threadid').value;
-                    d3.xhr(urls.posts + '/' + id + "?rev=" + rev)
-                    .on('error', function(e) {
-                        console.error(e); 
-                        alert("SHIT POST");
-                    })
-                    .on('load', function(e) {
-                        loadThread(thread)
-                    })
-                    .send('DELETE');
-                });
-            $post.select('.load')
-                .on('click', function() {
-                    window.location.hash = "posts/" + this.closest('.post').querySelector('._id').value;
-                });
-            $post.select('.unload')
-                .on('click', function() {
-                    window.location.hash = "posts/" + this.closest('.post').querySelector('.threadid').value;
-                });
-            $post.select('.interject')
-                .on('click', function(e) { 
-                var $nposted = d3.select(document.createElement("div")),
-                    that = this, 
-                    // XXX NEXT UP ON JAVASCRIPT, REPLACE THIS SHIT WITH PLAIN DOM APIS FOR OPTIMAL CLASSINESS
-                    thread = d3.select('#base_posted .threadid').attr('value')
-                    d3.selectAll('#posts .interject').style('display', 'none');
-                    $nposted.html(d3.select('#template').html())
-                        .attr('class', "post interjection posted")
-                        .attr('id', "")
-                    $nposted.select('.subject').node()
-                        .outerHTML = '<input class="subject" />';
-                    $nposted.select('.content').node()
-                        .outerHTML = '<textarea class="content"></textarea>';
-                    $nposted.select('.threadid')
-                        .attr('value', thread);
-                    $nposted.select('.owner')
-                        .attr('value', user);
-                    $nposted.select('.signature')
-                        .text(users[user].signature);
-                    $nposted.select('.signature').text(users[user].signature);
-                    $nposted.select('.avatar').attr('src', users[user].avatar);
-                    $nposted.select('.title').text(users[user].title);
-                    $nposted.select('.nick').text(users[user].nick);
-                    $nposted.select('.interject')
-                        .style('display', 'initial')
-                        .on('click', function() {
-                        var post = getPost(this.closest('.post'));
-                            post.parentid = that.closest('.post').querySelector('._id').value;
-                            postPost(post, function() {
-                                console.log("INTERJECTED");
+                /*
+                $post.select('.signature')
+                    .style('display', function(d) {
+                        return d.signature ? null : "none";
+                    });
+                */
+                $post.select('.edit')
+                    .on('click', function () {
+                        // Clicked "edit"
+                        var posted = this.closest('.post'),
+                            post = getPost(posted),
+                            that = this;
+                        d3.select(posted).classed("posted", true);
+                        posted.querySelector('.content')
+                            .outerHTML = '<textarea class="content">' + post.content + '</textarea>';
+                        posted.querySelector('.subject')
+                            .outerHTML = '<input class="subject" value="' + post.subject + '" />';
+                    });
+                $post.select('.cancel')
+                    .on('click', function () {
+                        var posted = this.closest('.post'),
+                            thread = this.closest('.post').querySelector('.threadid').value;
+                        d3.select(posted).classed("posted", false);
+                        posted.querySelector('.subject')
+                            .outerHTML = '<div class="subject"></div>';
+                        posted.querySelector('.content')
+                            .outerHTML = '<div class="content"></div>';
+                        loadThread(thread);
+                    });
+                $post.select('.save')
+                    .on('click', function () {
+                        var posted = this.closest('.post'),
+                            post = getPost(posted), // XXX NO DATE
+                            thread = d3.select('#base_posted .threadid').attr('value');
+                        console.log("Saving..");
+                        postPost(post, function() {
+                                // Post has been saved, unhide buttons, 
+                                d3.select(posted).classed("posted", false);
+                                posted.querySelector('.subject')
+                                    .outerHTML = '<div class="subject"></div>';
+                                posted.querySelector('.content')
+                                    .outerHTML = '<div class="content">loading...</div>';
                                 loadThread(thread);
+                        });
+                    });
+                $post.select('.delete')
+                    .on('click', function() {
+                        var id = this.closest('.post').querySelector('._id').value,
+                            rev = this.closest('.post').querySelector('._rev').value,
+                            thread = this.closest('.post').querySelector('.threadid').value;
+                        d3.xhr(urls.posts + '/' + id + "?rev=" + rev)
+                        .on('error', function(e) {
+                            console.error(e); 
+                            alert("SHIT POST");
+                        })
+                        .on('load', function(e) {
+                            loadThread(thread)
+                        })
+                        .send('DELETE');
+                    });
+                $post.select('.load')
+                    .on('click', function() {
+                        window.location.hash = "posts/" + this.closest('.post').querySelector('._id').value;
+                    });
+                $post.select('.unload')
+                    .on('click', function() {
+                        window.location.hash = "posts/" + this.closest('.post').querySelector('.threadid').value;
+                    });
+                $post.select('.interject')
+                    .on('click', function(e) { 
+                    var $nposted = d3.select(document.createElement("div")),
+                        that = this, 
+                        // XXX NEXT UP ON JAVASCRIPT, REPLACE THIS SHIT WITH PLAIN DOM APIS FOR OPTIMAL CLASSINESS
+                        thread = d3.select('#base_posted .threadid').attr('value')
+                        d3.selectAll('#posts .interject').style('display', 'none');
+                        $nposted.html(d3.select('#template').html())
+                            .attr('class', "post interjection posted")
+                            .attr('id', "")
+                        $nposted.select('.subject').node()
+                            .outerHTML = '<input class="subject" />';
+                        $nposted.select('.content').node()
+                            .outerHTML = '<textarea class="content"></textarea>';
+                        $nposted.select('.threadid')
+                            .attr('value', thread);
+                        $nposted.select('.owner')
+                            .attr('value', user);
+                        $nposted.select('.signature')
+                            .text(users[user].signature);
+                        $nposted.select('.signature').text(users[user].signature);
+                        $nposted.select('.avatar').attr('src', users[user].avatar);
+                        $nposted.select('.title').text(users[user].title);
+                        $nposted.select('.nick').text(users[user].nick);
+                        $nposted.select('.interject')
+                            .style('display', 'initial')
+                            .on('click', function() {
+                            var post = getPost(this.closest('.post'));
+                                post.parentid = that.closest('.post').querySelector('._id').value;
+                                postPost(post, function() {
+                                    console.log("INTERJECTED");
+                                    loadThread(thread);
+                                });
                             });
-                        });
-                    $nposted.datum({});
-                    $nposted.select('.cancel')
-                        .style('display', 'initial')
-                        .on('click', function() {
-                            d3.selectAll('#posts .post:not(.interjection) .interject').style('display', 'initial');
-                            $nposted.remove();
-                        });
-                    document.getElementById('posts')
-                        .insertBefore($nposted.node(), that.closest('.post').nextSibling)
-                })
-        };
+                        $nposted.datum({});
+                        $nposted.select('.cancel')
+                            .style('display', 'initial')
+                            .on('click', function() {
+                                d3.selectAll('#posts .post:not(.interjection) .interject').style('display', 'initial');
+                                $nposted.remove();
+                            });
+                        document.getElementById('posts')
+                            .insertBefore($nposted.node(), that.closest('.post').nextSibling)
+                    });
+            };
         console.log("RENDERING POSTS:", posts);
         // Delete posts that no longer exist
         $posts.exit().remove(); // XXX NEXT UP ON JAVASCRIPT - TRANSITION FWOOSH TO LEFT
@@ -869,8 +944,11 @@ document.addEventListener("DOMContentLoaded", function() {
                 var $help_page = d3.select(this)
                 $help_page.select('button.render')
                 .on('click', function() {
-                    renderMarkdown($help_page.select('div.help'), 
-                                   $help_page.select('textarea.help').property('value'));
+                    $help_page.select('div.help')
+                        .html("")
+                        .append(function() { 
+                            return format($help_page.select('textarea.help').property('value'))
+                        });
                 })
             }
         },
@@ -1014,7 +1092,23 @@ document.addEventListener("DOMContentLoaded", function() {
     <br />
     <hr />
     <textarea class="help">
-    Press "render" below to see what this box would look like as a post
+Press "render" below to see what this box would look like as a post
+__this is some underlinetext__
+**this is some boldtext**
+~~this is some strikethroughtext~~
+**this __should not*** work___
+**this __however__ should**
+**__and this__**
+**__but not this**__
+Let's see if **this** is different than __this.__ Cool?
+>this is some quotetext
+but >this is not
+*this
+*should
+*be the end of a list
+not in the list
+*what about this?
+and *this should not invoke a new list
     </textarea>
     <br />
     <button class="render">Render</button>

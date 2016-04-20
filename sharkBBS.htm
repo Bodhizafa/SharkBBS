@@ -481,49 +481,163 @@ document.addEventListener("DOMContentLoaded", function() {
             }
         },
 // Application - Metaphorically a picture of how data is metaphorically shaped on the backend
+        // return a 'div' DOM element representing "source" rendered according to the semantics of this function.
+        /*
+            <block> ::= <block> <block> | <text> | <list> | <quote>
+            <text> ::= <text> <text> | <span> \n 
+            <span> ::= <span> <span> | <content> | <underlinetext> | <strikethroughtext> | <boldtext> | <italicstext>
+            <underlinetext> ::= __ <span> __ 
+            <strikethroughtext> ::= ~~ <span> ~~ 
+            <boldtext> ::= ** <span> ** 
+            <italicstext> := // <span> // 
+            <list> ::= <listitem> | <listitem> <list>
+            <listitem> ::= * <span> \n
+            <quote> ::= <quoteitem> | <quoteitem> <quote>
+            <quoteitem> ::= > <span> \n
+            <content> ::= words and spaces
+        */
         format = function(source) {
-            // return a 'div' DOM element representing "source" rendered according to the semantics of this function.
-            var elem = document.createElement('div'),
-                // tokens which can have formatting semantics. They'll show up in the token stream as strings
-                formatting_tokens = ['__', '~~', '**', '//', '>', '*', '\n'],
-                grammar = {/*
-                    <block> ::= <block> <block> | <text> | <list> | <quote>
-                    <text> ::= <text> <text> | <span> \n 
-                    <span> ::= <span> <span> | <content> | <underlinetext> | <strikethroughtext> | <boldtext> | <italicstext>
-                    <underlinetext> ::= __ <span> __ 
-                    <strikethroughtext> ::= ~~ <span> ~~ 
-                    <boldtext> ::= ** <span> ** 
-                    <italicstext> := // <span> // 
-                    <list> ::= <listitem> | <listitem> <list>
-                    <listitem> ::= * <span> \n
-                    <quote> ::= <quoteitem> | <quoteitem> <quote>
-                    <quoteitem> ::= > <span> \n
-                    <content> ::= words and spaces
-                function() {
-                    var block, text, line, span, underlinetext, strikethroughtext, boldtext, italicstext, list, listitem, quote, quoteitem, content;
-                    document = run(block);
-                    block = or(text, list, quote);
-                    text = run(adjacent(run(span), '\n'));
-                    span ::= or(content, underlinetext, strikethroughtext, boldtext, italicstext);
-                    underlinetext = adjacent('__', span, '__');
-                    strikethroughtext = adjacent('~~', span, '~~');
-                    boldtext = adjacent('**', span, '**');
-                    italicstext = adjacent('//', span, '//');
-                    list = run(listitem);
-                    listitem = adjacent('*', content, '\n');
+            // tokens which can have formatting semantics. They'll show up in the token stream as strings
+            var formatting_tokens = ['__', '~~', '**', '//', '>', '*', '\n'],
+                parse = (function() {
+                    var 
+                        // There's a lots of items in this grammar where we wrap the second argument of an adjacent in some kind of element,
+                        wrap = function(elem_type, idx) {
+                            return function(elemss) {
+                                var elem = document.createElement(elem_type);
+                                for (var i = 0; i < elems[idx].length; i++) {
+                                    elem.appendChild(elemss[idx][i]);
+                                }
+                                return [elem];
+                            };
+                        },
+                        // There's also a lot of items where we collect runs of shit into some kind of container
+                        collect = function(element, properties) {
+                            if (!properties) {
+                                properties = {};
+                            }
+                            return function(elemss) {
+                                var elem = document.createElement(elemtype),
+                                    elems = flatten(elemss);
+                                elems.forEach(function(e) {
+                                    elem.appendChild(e);
+                                })
+                                Object.keys(properties).forEach(function(k) {
+                                    elem[k] = properties[k];
+                                })
+                                return [elem]
+                            }
+                        },
+                        flatten = function(elemss) {
+                            var elems = [];
+                            elemss.forEach(function(new_elems) {
+                                elems.push.apply(elems, new_elems); // this is really just array concatenation
+                            })
+                            return elems;
+                        },
+                        // I think some nerds call these combinators. 
+                        // They take some arguments as to what they match, some take a composer as the last argument, which is expected to combine the
+                        // results of the subparsers (i.e. take a list of lists of DOM nodes and return a list of DOM nodes)
+                        // The functions they return take a stream and return a (perhaps empty) flat list of DOM nodes, or undefined if they did not match.
+                        // They advance the tokenstream over what they matched when they do.
 
-                }
-                */}
+                        // Returns a function that looks for 'token' and returns [], no composer
+                        tok = function(token) { 
+                            return function(token_stream) {
+                                if (token_stream.read(1)[0] == token) {
+                                    return []
+                                }
+                            }
+                        },
+                        // Tries a few things, passes the results of the first match up, 
+                        // no composer
+                        or = function() { 
+                            var args = Array.from(arguments)
+                            return function(token_stream) {
+                                var elems;
+                                for (var i = 0; i < args.length; i++) {
+                                    elems = args[i](token_stream)
+                                    if (elems !== undefined) {
+                                        return elems;
+                                    }
+                                }
+                            }
+                        },
+                        // Checks for each of its arguments next to eachother. 
+                        adjacent = function() { 
+                            var args = Array.from(arguments)
+                                composer = args.pop();
+                            return function(token_stream) {
+                                var pos = token_stream.tell(),
+                                    elems,
+                                    elemss = [];
+                                for (var i = 0; i < args.length; i++) {
+                                    elems = args[i](token_stream)
+                                    if (elems !== undefined) {
+                                        token_stream.seek(pos);
+                                        return;
+                                    } else {
+                                        elemss.push(elems);
+                                    }
+                                }
+                                return composer(elemss);
+                            }
+                        },
+                        // checks for a given thing next to itself one or many times
+                        run = function(segment, composer) { 
+                            return function(token_stream) {
+                                var elems,
+                                    elemss = [];
+                                do {
+                                    elems = segment(token_stream);
+                                    if (elems !== undefined) {
+                                        elemss.push(elems);
+                                    }
+                                } while(elems !== undefined);
+                                if (elemss.length > 0) {
+                                    return composer(elemss);
+                                }
+                            }
+                        },
+                    // Actual grammar definition
+                        doc, block, text, line, span, underlinetext, strikethroughtext, boldtext, italicstext, list, listitem, quote, quoteitem, content;
+                    doc = run(block, collect('div', {'class': 'formatted'}));
+                    block = or(text, list, quote);
+                    text = run(adjacent(run(span, flatten), tok('\n'), 
+                            function (elemss) { 
+                                var elems = elemss[0].slice();
+                                elems.push(document.createElement('br'));
+                            }), 
+                        collect('div'));
+                    span = or(content, underlinetext, strikethroughtext, boldtext, italicstext);
+                    underlinetext = adjacent(tok('__'), span, tok('__'), wrap('u', 1));
+                    strikethroughtext = adjacent('~~', span, tok('~~'), wrap('del', 1));
+                    boldtext = adjacent(tok('**'), span, tok('**'), wrap('b', 1));
+                    italicstext = adjacent(tok('//'), span, tok('//'), wrap('i', 1));
+                    list = run(listitem, collect('ul'));
+                    listitem = adjacent(tok('*'), run(span, flatten), tok('\n'), wrap('li', 1));
+                    quote = run(quoteitem);
+                    quoteitem = adjacent(tok('>'), run(span, flatten), tok('\n'), collect('div', {'class': 'quote'}));
+                    content = function(tokstream) { 
+                        var tok = tokstream.read(1)[0],
+                            elem;
+                        if (tok.is_content) {
+                            elem = document.createTextNode(content.join(""))
+                            return [elem];
+                        }
+                    };
+                    return doc;
+                })(),
                 token_stream = (function() {
                 var tokens = [],
                     current_token = [], // Use arrays of characters because you can't decorate normal strings
                                         // Tokens other than runs of text are still normal strings.
                     skip = 1, 
-                    matched = false,
-                    stream_pos = 0;
+                    matched = false;
                     
                     for (var pos = 0; pos < source.length; pos += skip) {
-                        matched = false;
+                        matched = false,
+                        make_stream;
                         formatting_tokens.forEach(function(t) {
                             if (matched) {
                                 return;
@@ -538,7 +652,7 @@ document.addEventListener("DOMContentLoaded", function() {
                             }
                         })
                         if (!matched) {
-                            current_token.push(source[pos])
+                            current_token.push(source[pos]);
                             skip = 1;
                         }
                     }
@@ -553,11 +667,28 @@ document.addEventListener("DOMContentLoaded", function() {
                         },
                         "advance": function(n) {
                             stream_pos += n;
+                        }, // We need a stack of stream positions because composed parsers can expect multiple things in a row 
+                           // and need to be able to fail wholesale even if a subset of what they want succeeds, or 
+                        "seek": function(pos) { 
+                            stream_pos = pos;
+                        },
+                        "tell": function() { 
+                            return stream_pos;
                         }
                     }
-                })();
-            
-            elem.textContent = source;
+                })(),
+                parsetree;
+            parsetree = parse(token_stream);
+            if (!parsetree) {
+                console.error("Post did not format.", source);
+                parsetree = document.createElement('div')
+                parsetree.class = "content"
+                .textContent = source;
+                return parsetree;
+            } else {
+                return parsetree[0];
+            }
+
             return elem;
         },
         renderPosts = function(posts) {

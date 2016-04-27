@@ -500,19 +500,25 @@ document.addEventListener("DOMContentLoaded", function() {
             // tokens which can have formatting semantics. They'll show up in the token stream as strings
             var formatting_tokens = ['__', '~~', '**', '//', '>', '*', '\n'],
                 parse = (function() {
-                    var 
+                    var flatten = function flatten(elemss) {
+                            var elems = [];
+                            elemss.forEach(function(new_elems) {
+                                elems.push.apply(elems, new_elems); // this is really just array concatenation
+                            });
+                            return elems;
+                        },
                         // There's a lots of items in this grammar where we wrap the second argument of an adjacent in some kind of element,
-                        wrap = function(elem_type, idx) {
+                        wrap = function wrap (elem_type, idx) {
                             return function(elemss) {
                                 var elem = document.createElement(elem_type);
-                                for (var i = 0; i < elems[idx].length; i++) {
+                                for (var i = 0; i < elemss[idx].length; i++) {
                                     elem.appendChild(elemss[idx][i]);
                                 }
                                 return [elem];
                             };
                         },
                         // There's also a lot of items where we collect runs of shit into some kind of container
-                        collect = function(element, properties) {
+                        collect = function collect(elemtype, properties) {
                             if (!properties) {
                                 properties = {};
                             }
@@ -525,15 +531,8 @@ document.addEventListener("DOMContentLoaded", function() {
                                 Object.keys(properties).forEach(function(k) {
                                     elem[k] = properties[k];
                                 })
-                                return [elem]
+                                return [elem];
                             }
-                        },
-                        flatten = function(elemss) {
-                            var elems = [];
-                            elemss.forEach(function(new_elems) {
-                                elems.push.apply(elems, new_elems); // this is really just array concatenation
-                            })
-                            return elems;
                         },
                         // I think some nerds call these combinators. 
                         // They take some arguments as to what they match, some take a composer as the last argument, which is expected to combine the
@@ -542,21 +541,29 @@ document.addEventListener("DOMContentLoaded", function() {
                         // They advance the tokenstream over what they matched when they do.
 
                         // Returns a function that looks for 'token' and returns [], no composer
-                        tok = function(token) { 
-                            return function(token_stream) {
+                        tok = function tok(token) { 
+                            return function tok_generated(token_stream) {
                                 if (token_stream.read(1)[0] == token) {
-                                    return []
+                                    token_stream.advance(1);
+                                    return [];
                                 }
-                            }
+                            };
                         },
                         // Tries a few things, passes the results of the first match up, 
                         // no composer
-                        or = function() { 
+                        or = function or() { 
                             var args = Array.from(arguments)
-                            return function(token_stream) {
-                                var elems;
-                                for (var i = 0; i < args.length; i++) {
+                            return function or_generated(token_stream) {
+                                var elems, i;
+                                for (i = 0; i < args.length; i++) {
+                                    if (args[i].name === undefined) {
+                                        if (gram[args[i]] === undefined) {
+                                            console.error("or could not find at runtime:", args[i]);
+                                        }
+                                        args[i] = gram[args[i]];
+                                    }
                                     elems = args[i](token_stream)
+                                    //console.log("or invoked ", args[i].name, args[i].debug_name, "got", elems, "next", token_stream.read(1));
                                     if (elems !== undefined) {
                                         return elems;
                                     }
@@ -564,16 +571,24 @@ document.addEventListener("DOMContentLoaded", function() {
                             }
                         },
                         // Checks for each of its arguments next to eachother. 
-                        adjacent = function() { 
-                            var args = Array.from(arguments)
+                        adjacent = function adjacent() { 
+                            var args = Array.from(arguments),
                                 composer = args.pop();
-                            return function(token_stream) {
+                            return function adj_generated(token_stream) {
                                 var pos = token_stream.tell(),
                                     elems,
-                                    elemss = [];
-                                for (var i = 0; i < args.length; i++) {
+                                    elemss = [], 
+                                    i;
+                                for (i = 0; i < args.length; i++) {
+                                    if (args[i].name === undefined) {
+                                        if (gram[args[i]] === undefined) {
+                                            console.error("adjacent could not find at runtime:", args[i]);
+                                        }
+                                        args[i] = gram[args[i]];
+                                    }
                                     elems = args[i](token_stream)
-                                    if (elems !== undefined) {
+                                    //console.log("adj invoked ", args[i].name, args[i].debug_name, "got", elems, "next", token_stream.read(1));
+                                    if (elems === undefined) {
                                         token_stream.seek(pos);
                                         return;
                                     } else {
@@ -584,12 +599,20 @@ document.addEventListener("DOMContentLoaded", function() {
                             }
                         },
                         // checks for a given thing next to itself one or many times
-                        run = function(segment, composer) { 
-                            return function(token_stream) {
+                        run = function run(segment, composer) { 
+                            return function run_generated(token_stream) {
                                 var elems,
-                                    elemss = [];
+                                    elemss = [],
+                                    i = 0;
+                                if (segment.name === undefined) { 
+                                    if (gram[segment] === undefined) {
+                                        console.error("run could not find at runtime:", segment);
+                                    }
+                                    segment = gram[segment];
+                                }
                                 do {
                                     elems = segment(token_stream);
+                                    //console.log("run invoked ", segment.name, segment.debug_name, "got", elems, "next", token_stream.read(1));
                                     if (elems !== undefined) {
                                         elemss.push(elems);
                                     }
@@ -599,52 +622,60 @@ document.addEventListener("DOMContentLoaded", function() {
                                 }
                             }
                         },
-                    // Actual grammar definition
-                        doc, block, text, line, span, underlinetext, strikethroughtext, boldtext, italicstext, list, listitem, quote, quoteitem, content;
-                    doc = run(block, collect('div', {'class': 'formatted'}));
-                    block = or(text, list, quote);
-                    text = run(adjacent(run(span, flatten), tok('\n'), 
-                            function (elemss) { 
-                                var elems = elemss[0].slice();
-                                elems.push(document.createElement('br'));
-                            }), 
-                        collect('div'));
-                    span = or(content, underlinetext, strikethroughtext, boldtext, italicstext);
-                    underlinetext = adjacent(tok('__'), span, tok('__'), wrap('u', 1));
-                    strikethroughtext = adjacent('~~', span, tok('~~'), wrap('del', 1));
-                    boldtext = adjacent(tok('**'), span, tok('**'), wrap('b', 1));
-                    italicstext = adjacent(tok('//'), span, tok('//'), wrap('i', 1));
-                    list = run(listitem, collect('ul'));
-                    listitem = adjacent(tok('*'), run(span, flatten), tok('\n'), wrap('li', 1));
-                    quote = run(quoteitem);
-                    quoteitem = adjacent(tok('>'), run(span, flatten), tok('\n'), collect('div', {'class': 'quote'}));
-                    content = function(tokstream) { 
-                        var tok = tokstream.read(1)[0],
-                            elem;
-                        if (tok.is_content) {
-                            elem = document.createTextNode(content.join(""))
-                            return [elem];
-                        }
-                    };
-                    return doc;
+                        // Actual grammar definition
+                        gram = {
+                            'doc'       : adjacent(run('block', collect('div', {'class': 'formatted'})), tok(undefined), flatten),
+                            'block'     : or('list', 'quote', 'text'),
+                            'text'      : run(adjacent(run('span', flatten), tok('\n'), 
+                                function (elemss) {
+                                    var elems = elemss[0].slice();
+                                    elems.push(document.createElement('br'));
+                                    return elems;
+                                }), 
+                                collect('div')),
+                            'span'      : or('content', 'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext'),
+                            'underlinetext' : adjacent(tok('__'), run('span', flatten), tok('__'), wrap('u', 1)),
+                            'strikethroughtext' : adjacent(tok('~~'), run('span', flatten), tok('~~'), wrap('del', 1)),
+                            'boldtext'  : adjacent(tok('**'), run('span', flatten), tok('**'), wrap('b', 1)),
+                            'italicstext'   : adjacent(tok('//'), run('span', flatten), tok('//'), wrap('i', 1)),
+                            'list'      : run('listitem', collect('ul')),
+                            'listitem'  : adjacent(tok('*'), run('span', flatten), tok('\n'), wrap('li', 1)),
+                            'quote'     : run('quoteitem' ,collect('div', {'class': 'quote'})),
+                            'quoteitem' : adjacent(tok('>'), run('span', flatten), tok('\n'), flatten),
+                            'content'   : function content(token_stream) { 
+                                var tok = token_stream.read(1)[0],
+                                    elem;
+                                if (tok !== undefined && tok.is_content) {
+                                    elem = document.createTextNode(tok.join(""));
+                                    token_stream.advance(1);
+                                    return [elem];
+                                }
+                            }
+                        };
+                    Object.keys(gram).forEach(function(k) {
+                        gram[k].debug_name = k;
+                    });
+                    return gram.doc;
                 })(),
                 token_stream = (function() {
                 var tokens = [],
                     current_token = [], // Use arrays of characters because you can't decorate normal strings
                                         // Tokens other than runs of text are still normal strings.
                     skip = 1, 
-                    matched = false;
+                    matched = false,
+                    stream_pos = 0;
                     
                     for (var pos = 0; pos < source.length; pos += skip) {
                         matched = false,
-                        make_stream;
                         formatting_tokens.forEach(function(t) {
                             if (matched) {
                                 return;
                             }
                             if (source.substr(pos, t.length) == t) {
-                                current_token.is_content = true; // this token is user content, not formatting metadata
-                                tokens.push(current_token);
+                                if (current_token.length) {
+                                    current_token.is_content = true; // this token is user content, not formatting metadata
+                                    tokens.push(current_token);
+                                }
                                 current_token = [];
                                 tokens.push(t);
                                 skip = t.length;
@@ -660,10 +691,13 @@ document.addEventListener("DOMContentLoaded", function() {
                         current_token.is_content = true;
                         tokens.push(current_token);
                     }
+                    if (tokens[tokens.length-1] != '\n') {
+                        tokens.push("\n");
+                    }
                     console.log("Tokenized into ", tokens);
                     return {
                         "read": function(n) {
-                            return tokstream.slice(stream_pos, stream_pos + n);
+                            return tokens.slice(stream_pos, stream_pos + n);
                         },
                         "advance": function(n) {
                             stream_pos += n;
@@ -674,7 +708,8 @@ document.addEventListener("DOMContentLoaded", function() {
                         },
                         "tell": function() { 
                             return stream_pos;
-                        }
+                        },
+                        "_tokstream": tokens
                     }
                 })(),
                 parsetree;
@@ -683,7 +718,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 console.error("Post did not format.", source);
                 parsetree = document.createElement('div')
                 parsetree.class = "content"
-                .textContent = source;
+                parsetree.textContent = source;
                 return parsetree;
             } else {
                 return parsetree[0];
@@ -1223,23 +1258,16 @@ document.addEventListener("DOMContentLoaded", function() {
     <br />
     <hr />
     <textarea class="help">
-Press "render" below to see what this box would look like as a post
+Press "render" below to see what the contents of this box would look like as a post
 __this is some underlinetext__
 **this is some boldtext**
 ~~this is some strikethroughtext~~
-**this __should not*** work___
-**this __however__ should**
-**__and this__**
-**__but not this**__
-Let's see if **this** is different than __this.__ Cool?
->this is some quotetext
-but >this is not
-*this
-*should
-*be the end of a list
-not in the list
-*what about this?
-and *this should not invoke a new list
+//this is some italicstext//
+**this __however__ should** ANd more stuff on this line 
+*This is
+*a
+*list
+Some stuff on this line//as should __this__//
     </textarea>
     <br />
     <button class="render">Render</button>

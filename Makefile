@@ -1,4 +1,4 @@
-HOST=10.1.10.10:5984
+HOST=localhost:5984
 USER=root
 PASSWORD=berfberfberfberf
 BASEURL=http://$(USER):$(PASSWORD)@$(HOST)

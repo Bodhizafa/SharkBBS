@@ -5,13 +5,7 @@
 <script charset="utf-8" type="application/javascript" src="d3.js"></script>
 <style type="text/css">
 /*
- ----------------------------------------------------------------------------
- "THE BEER-WARE LICENSE" (Revision 42):
- <meernik@live.com> wrote this file. As long as you retain this notice you
- can do whatever you want with this stuff. If we meet some day, and you think
- this stuff is worth it, you can buy me a beer in return 
- - Landon
- ----------------------------------------------------------------------------
+(C) 2015-2016 Landon Meernik, all rights reserved
 */
 
 /* 
@@ -35,6 +29,7 @@ input,textarea,button,#topbar a {
     background-color: #222;
     border: 1pt solid orange; /* Good things are measured in points */
     color: orange;
+    font-family: monospace;
     border-radius: 3pt;
 }
 button {
@@ -233,6 +228,21 @@ img.avatar {
 .post.mine .delete {
     display: initial;
 }
+/* Bullshit for the formatter */
+.formatted .quote {
+    white-space: pre;
+    color: green;
+}
+.formatted a {
+    color: orange;
+}
+.formatted img {
+    max-width: 500pt;
+    max-height: 500pt;
+}
+.unformatted {
+    white-space: pre;
+}
 /* Other bullshit */
 textarea.help {
     max-width: 120ex;
@@ -268,7 +278,7 @@ Reply2Int1 (OP)
 |-...
 <<<^ go up one level by loading OP's threadid
 */
-var users = { // User data. Users missing these fields may not render correctly there may however be more, because #schemaless
+var users = { // User data. Users missing these fields may not render correctly. There may be more, because #schemaless
     "": { // Defaults
         "nick": "",
         "title": "",
@@ -482,23 +492,9 @@ document.addEventListener("DOMContentLoaded", function() {
         },
 // Application - Metaphorically a picture of how data is metaphorically shaped on the backend
         // return a 'div' DOM element representing "source" rendered according to the semantics of this function.
-        /*
-            <block> ::= <block> <block> | <text> | <list> | <quote>
-            <text> ::= <text> <text> | <span> \n 
-            <span> ::= <span> <span> | <content> | <underlinetext> | <strikethroughtext> | <boldtext> | <italicstext>
-            <underlinetext> ::= __ <span> __ 
-            <strikethroughtext> ::= ~~ <span> ~~ 
-            <boldtext> ::= ** <span> ** 
-            <italicstext> := // <span> // 
-            <list> ::= <listitem> | <listitem> <list>
-            <listitem> ::= * <span> \n
-            <quote> ::= <quoteitem> | <quoteitem> <quote>
-            <quoteitem> ::= > <span> \n
-            <content> ::= words and spaces
-        */
         format = function(source) {
             // tokens which can have formatting semantics. They'll show up in the token stream as strings
-            var formatting_tokens = ['__', '~~', '**', '//', '>', '*', '\n'],
+            var formatting_tokens = ['__', '~~', '**', '//', '>', '*', '\n', '[', ']', '|'],
                 parse = (function() {
                     var flatten = function flatten(elemss) {
                             var elems = [];
@@ -507,7 +503,7 @@ document.addEventListener("DOMContentLoaded", function() {
                             });
                             return elems;
                         },
-                        // There's a lots of items in this grammar where we wrap the second argument of an adjacent in some kind of element,
+                        // Wrap elemss[idx] in an elem_type
                         wrap = function wrap (elem_type, idx) {
                             return function(elemss) {
                                 var elem = document.createElement(elem_type);
@@ -517,22 +513,34 @@ document.addEventListener("DOMContentLoaded", function() {
                                 return [elem];
                             };
                         },
-                        // There's also a lot of items where we collect runs of shit into some kind of container
-                        collect = function collect(elemtype, properties) {
+                        // Wrap all elements in the given elem_type
+                        collect = function collect(elem_type, properties) {
                             if (!properties) {
                                 properties = {};
                             }
                             return function(elemss) {
-                                var elem = document.createElement(elemtype),
+                                var elem = document.createElement(elem_type),
                                     elems = flatten(elemss);
                                 elems.forEach(function(e) {
                                     elem.appendChild(e);
                                 })
                                 Object.keys(properties).forEach(function(k) {
-                                    elem[k] = properties[k];
+                                    elem.setAttribute(k, properties[k]);
                                 })
                                 return [elem];
                             }
+                        },
+                        link_composer = function(elemss) { // [url|spans]
+                            var url = elemss[1].map(function(n) { return n.textContent }).join(""), 
+                                elems = elemss[3],
+                                elem = document.createElement('a');
+                            elem.setAttribute('href', url)
+                            if (elems === undefined) {
+                                elem.textContent = url;
+                            } else {
+                                elems.forEach(function(el) { elem.appendChild(el) });
+                            }
+                            return [elem];
                         },
                         // I think some nerds call these combinators. 
                         // They take some arguments as to what they match, some take a composer as the last argument, which is expected to combine the
@@ -549,6 +557,15 @@ document.addEventListener("DOMContentLoaded", function() {
                                 }
                             };
                         },
+                        // Returns a function that looks for 'token' and returns a singleton list with a text node of said token
+                        tok_lit = function tok_lit(token) {
+                            return function tok_lit_generated(token_stream) {
+                                if (token_stream.read(1)[0] == token) {
+                                    token_stream.advance(1);
+                                    return [document.createTextNode(token)]
+                                }
+                            };
+                        },
                         // Tries a few things, passes the results of the first match up, 
                         // no composer
                         or = function or() { 
@@ -557,10 +574,10 @@ document.addEventListener("DOMContentLoaded", function() {
                                 var elems, i;
                                 for (i = 0; i < args.length; i++) {
                                     if (args[i].name === undefined) {
-                                        if (gram[args[i]] === undefined) {
+                                        if (grammar[args[i]] === undefined) {
                                             console.error("or could not find at runtime:", args[i]);
                                         }
-                                        args[i] = gram[args[i]];
+                                        args[i] = grammar[args[i]];
                                     }
                                     elems = args[i](token_stream)
                                     //console.log("or invoked ", args[i].name, args[i].debug_name, "got", elems, "next", token_stream.read(1));
@@ -581,10 +598,10 @@ document.addEventListener("DOMContentLoaded", function() {
                                     i;
                                 for (i = 0; i < args.length; i++) {
                                     if (args[i].name === undefined) {
-                                        if (gram[args[i]] === undefined) {
+                                        if (grammar[args[i]] === undefined) {
                                             console.error("adjacent could not find at runtime:", args[i]);
                                         }
-                                        args[i] = gram[args[i]];
+                                        args[i] = grammar[args[i]];
                                     }
                                     elems = args[i](token_stream)
                                     //console.log("adj invoked ", args[i].name, args[i].debug_name, "got", elems, "next", token_stream.read(1));
@@ -605,10 +622,10 @@ document.addEventListener("DOMContentLoaded", function() {
                                     elemss = [],
                                     i = 0;
                                 if (segment.name === undefined) { 
-                                    if (gram[segment] === undefined) {
+                                    if (grammar[segment] === undefined) {
                                         console.error("run could not find at runtime:", segment);
                                     }
-                                    segment = gram[segment];
+                                    segment = grammar[segment];
                                 }
                                 do {
                                     elems = segment(token_stream);
@@ -622,26 +639,41 @@ document.addEventListener("DOMContentLoaded", function() {
                                 }
                             }
                         },
-                        // Actual grammar definition
-                        gram = {
+                        grammar = {
                             'doc'       : adjacent(run('block', collect('div', {'class': 'formatted'})), tok(undefined), flatten),
                             'block'     : or('list', 'quote', 'text'),
-                            'text'      : run(adjacent(run('span', flatten), tok('\n'), 
+                            'text'      : run('line', collect('div')),
+                            'line'      : adjacent(or(adjacent('span_noblock', run('span', flatten), flatten), 'span_noblock', 'garbage'), tok('\n'), 
                                 function (elemss) {
                                     var elems = elemss[0].slice();
                                     elems.push(document.createElement('br'));
                                     return elems;
                                 }), 
-                                collect('div')),
-                            'span'      : or('content', 'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext'),
+                            'garbage'   : run(or('content', tok_lit('__'), tok_lit('**'), tok_lit('~~'), tok_lit('//'), 
+                                                 tok_lit('['), tok_lit('|'), tok_lit(']')), flatten),
+                            'span_noblock'      : or('content', 'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext', 'link', 'image'),
+                            'span'      : or('content', run('blockfmt', flatten), 
+                                             'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext', 
+                                             'link', 'image'),
+                            'blockfmt'  : or(tok_lit("*"), tok_lit(">")),
                             'underlinetext' : adjacent(tok('__'), run('span', flatten), tok('__'), wrap('u', 1)),
                             'strikethroughtext' : adjacent(tok('~~'), run('span', flatten), tok('~~'), wrap('del', 1)),
                             'boldtext'  : adjacent(tok('**'), run('span', flatten), tok('**'), wrap('b', 1)),
                             'italicstext'   : adjacent(tok('//'), run('span', flatten), tok('//'), wrap('i', 1)),
+                            'link'      : or(adjacent(tok('['), 'url', tok('|'), run('span', flatten), tok(']'), link_composer), 
+                                             adjacent(tok('['), 'url', tok(']'), link_composer)),
+                            'image'     : adjacent(tok('['), 'url', tok('|'), tok(']'), 
+                                function(elemss) {
+                                    var url = elemss[1].map(function(n) { return n.textContent }).join(""), 
+                                        elem = document.createElement('img');
+                                    elem.setAttribute('src', url);
+                                    return [elem];
+                                }),
+                            'url'       : run(or('content', tok_lit('//')), flatten),
                             'list'      : run('listitem', collect('ul')),
                             'listitem'  : adjacent(tok('*'), run('span', flatten), tok('\n'), wrap('li', 1)),
-                            'quote'     : run('quoteitem' ,collect('div', {'class': 'quote'})),
-                            'quoteitem' : adjacent(tok('>'), run('span', flatten), tok('\n'), flatten),
+                            'quote'     : run('quoteitem', collect('div', {'class': 'quote'})),
+                            'quoteitem' : adjacent(tok_lit('>'), run('span', flatten), tok_lit('\n'), flatten),
                             'content'   : function content(token_stream) { 
                                 var tok = token_stream.read(1)[0],
                                     elem;
@@ -652,18 +684,18 @@ document.addEventListener("DOMContentLoaded", function() {
                                 }
                             }
                         };
-                    Object.keys(gram).forEach(function(k) {
-                        gram[k].debug_name = k;
+                    Object.keys(grammar).forEach(function(k) {
+                        grammar[k].debug_name = k;
                     });
-                    return gram.doc;
+                    return grammar.doc;
                 })(),
                 token_stream = (function() {
-                var tokens = [],
-                    current_token = [], // Use arrays of characters because you can't decorate normal strings
-                                        // Tokens other than runs of text are still normal strings.
-                    skip = 1, 
-                    matched = false,
-                    stream_pos = 0;
+                    var tokens = [],
+                        current_token = [], // Use arrays of characters because you can't decorate normal strings and constructing them is slow
+                                            // Tokens other than runs of text are still normal strings.
+                        skip = 1, 
+                        matched = false,
+                        stream_pos = 0;
                     
                     for (var pos = 0; pos < source.length; pos += skip) {
                         matched = false,
@@ -701,8 +733,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         },
                         "advance": function(n) {
                             stream_pos += n;
-                        }, // We need a stack of stream positions because composed parsers can expect multiple things in a row 
-                           // and need to be able to fail wholesale even if a subset of what they want succeeds, or 
+                        }, 
                         "seek": function(pos) { 
                             stream_pos = pos;
                         },
@@ -715,14 +746,13 @@ document.addEventListener("DOMContentLoaded", function() {
                 parsetree;
             parsetree = parse(token_stream);
             if (!parsetree) {
-                console.error("Post did not format.", source);
-                parsetree = document.createElement('div')
-                parsetree.class = "content"
-                parsetree.textContent = source;
-                return parsetree;
-            } else {
+                console.error("Post did not format.");
+                parsetree = [document.createElement('div')];
+                parsetree[0].class = "unformatted";
+                parsetree[0].textContent = source;
                 return parsetree[0];
-            }
+            } 
+            return parsetree[0];
 
             return elem;
         },
@@ -879,7 +909,7 @@ document.addEventListener("DOMContentLoaded", function() {
             };
         console.log("RENDERING POSTS:", posts);
         // Delete posts that no longer exist
-        $posts.exit().remove(); // XXX NEXT UP ON JAVASCRIPT - TRANSITION FWOOSH TO LEFT
+        $posts.exit().remove(); 
         // Update the new post
         updatePost($npost);
         // Update an existing post
@@ -906,6 +936,7 @@ document.addEventListener("DOMContentLoaded", function() {
             });
         });
     }
+
     // I heard cool kids used hash routers
     // When you navigate to page foo:
     //   The element with class "page" and an ID that starts with foo are set display:block
@@ -1263,11 +1294,14 @@ __this is some underlinetext__
 **this is some boldtext**
 ~~this is some strikethroughtext~~
 //this is some italicstext//
-**this __however__ should** ANd more stuff on this line 
-*This is
+You can combine them: //like __this__//
+*This 
+*is
 *a
 *list
-Some stuff on this line//as should __this__//
+>this is a quote
+A link: [https://google.com]
+And a picture of a hat: [./prophat.jpg|]
     </textarea>
     <br />
     <button class="render">Render</button>
@@ -1284,7 +1318,6 @@ var urls = {
     "session": "/_session",
     "users": "/_users"
 }
-
 // Utilities
 if (Element.prototype.closest === undefined) {
     console.log("Registering closest");

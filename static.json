@@ -1,4 +1,0 @@
-{
-    "language": "javascript",
-    "validate_doc_update": " function (newDoc, oldDoc, userCtx, secObj) { if (userCtx.name == 'root') return true; else throw {forbidden:'nope'}}"
-}

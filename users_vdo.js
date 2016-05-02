@@ -1,8 +1,4 @@
 function (newDoc, oldDoc, userCtx, secObj) {
-    log('USERS UPDATE VALIDATING');
-    log(oldDoc);
-    log('->');
-    log(newDoc);
     ['nick', 'avatar', 'signature'].forEach(function(field) {
         if (newDoc[field] === undefined) {
             throw {forbidden: 'Field is undefined: ' + field};
@@ -10,5 +6,8 @@ function (newDoc, oldDoc, userCtx, secObj) {
             throw {forbidden: 'Field is null: ' + field};
         }
     });
+    if (newDoc.passcode != 'smoke the better pole') {
+        throw {forbidden: 'Incorrect secret passcode'};
+    }
     return true;
 }

@@ -5,16 +5,14 @@
 <script charset="utf-8" type="application/javascript" src="d3.js"></script>
 <style type="text/css">
 /* (C) 2015-2016 Landon Meernik, all rights reserved */
-
-/* 
-This is made up of 
-    cyan borders and text, 
-    orange bordered interactables, 
-    white user content, 
-    black background, 
+/*
+This is made up of
+    cyan borders and text,
+    orange bordered interactables,
+    white user content,
+    black background,
     and a dash of #222
 */
-
 /* Overall Bullshit */
 body {
     font-family: monospace;
@@ -249,11 +247,11 @@ textarea.help {
     height: 30em;
 }
 </style>
-<title>Couchlocked...</title>
+<title>...</title>
 <script>
 "use strict";
 // Model - Literally a picture of how data is literally shaped on the backend
-/* 
+/*
 threadid is the id of the thread you would be replying to if you hit 'reply'.
 
 |-  means: threadid points to ID of post in the column where | is.
@@ -267,7 +265,7 @@ threadid is the id of the thread you would be replying to if you hit 'reply'.
    |-Reply2Int1 Reply1          # not displayed in this thread
    |-...        Reply...
 |--Reply2Int2
-|-Reply3 
+|-Reply3
 |-...
 ^ current threadid
 >>>^ go in one level by setting current threadid to Reply2Int1
@@ -327,7 +325,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 console.debug("Users cache hit");
                 log_cb();
                 return;
-            } 
+            }
             d3.xhr(urls.users + "/_all_docs?include_docs=true", function(resp) {
                 var rows = JSON.parse(resp.response).rows;
                 rows.forEach(function(row) {
@@ -362,7 +360,7 @@ document.addEventListener("DOMContentLoaded", function() {
         // Then it compiles a list of usernames owning posts in the thread (which will be required to render), primes the users
         // cache with them (the third request), and then calls renderPosts(posts) once everything is in place
             var replies = [],
-                requests = 2, 
+                requests = 2,
                 interjections_by_parentid = {},
                 actuallyLoadThread = function() { // Called when interjections_by_postid and replies are populated
                     var posts = [],
@@ -374,7 +372,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         posts.push(reply);
                         if (interjections_by_parentid[reply._id]) {
                             interjections_by_parentid[reply._id].sort(function(a, b) { return d3.descending(a.lasted, b.lasted); })
-                            interjections_by_parentid[reply._id].forEach(function(interjection) { 
+                            interjections_by_parentid[reply._id].forEach(function(interjection) {
                                 posts.push(interjection);
                             });
                             delete interjections_by_parentid[reply._id];
@@ -388,8 +386,8 @@ document.addEventListener("DOMContentLoaded", function() {
                         usernames.push(post.owner);
                     })
                     console.debug("Collated posts: ", posts);
-                    primeUsers(usernames, function() { 
-                        renderPosts(posts); 
+                    primeUsers(usernames, function() {
+                        renderPosts(posts);
                         d3.select('#base_posted .threadid').attr('value', new_threadid); // XXX should this be property?
                     });
                 };
@@ -435,7 +433,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 }));
         },
         // Given an element which is a post (or post editor), return the post JSON object
-        getPost = function(posted) { 
+        getPost = function(posted) {
         var subject = posted.querySelector('.subject'),
             content = posted.querySelector('.content'),
             signature = posted.querySelector('.signature'),
@@ -459,13 +457,13 @@ document.addEventListener("DOMContentLoaded", function() {
             }
             return post;
         },
-        postPost = function(post, callback) { 
+        postPost = function(post, callback) {
         var actuallyPostPost = function() {
             var revstr = post._rev ? "?rev=" + post._rev : "";
             d3.xhr(urls.post + '/' + post._id + revstr)
                 .mimeType("application/json")
                 .on('error', function(e) {
-                    console.error(e); 
+                    console.error(e);
                     alert("SHIT POST");
                  })
                 .on('load', function(resp) {
@@ -530,7 +528,7 @@ document.addEventListener("DOMContentLoaded", function() {
                             }
                         },
                         link_composer = function(elemss) { // [url|spans]
-                            var url = elemss[1].map(function(n) { return n.textContent }).join(""), 
+                            var url = elemss[1].map(function(n) { return n.textContent }).join(""),
                                 elems = elemss[3],
                                 elem = document.createElement('a');
                             elem.setAttribute('href', url)
@@ -541,14 +539,14 @@ document.addEventListener("DOMContentLoaded", function() {
                             }
                             return [elem];
                         },
-                        // I think some nerds call these combinators. 
+                        // I think some nerds call these combinators.
                         // They take some arguments as to what they match, some take a composer as the last argument, which is expected to combine the
                         // results of the subparsers (i.e. take a list of lists of DOM nodes and return a list of DOM nodes)
                         // The functions they return take a stream and return a (perhaps empty) flat list of DOM nodes, or undefined if they did not match.
                         // They advance the tokenstream over what they matched when they do.
 
                         // Returns a function that looks for 'token' and returns [], no composer
-                        tok = function tok(token) { 
+                        tok = function tok(token) {
                             return function tok_generated(token_stream) {
                                 if (token_stream.read(1)[0] == token) {
                                     token_stream.advance(1);
@@ -565,9 +563,9 @@ document.addEventListener("DOMContentLoaded", function() {
                                 }
                             };
                         },
-                        // Tries a few things, passes the results of the first match up, 
+                        // Tries a few things, passes the results of the first match up,
                         // no composer
-                        or = function or() { 
+                        or = function or() {
                             var args = Array.from(arguments)
                             return function or_generated(token_stream) {
                                 var elems, i;
@@ -586,14 +584,14 @@ document.addEventListener("DOMContentLoaded", function() {
                                 }
                             }
                         },
-                        // Checks for each of its arguments next to eachother. 
-                        adjacent = function adjacent() { 
+                        // Checks for each of its arguments next to eachother.
+                        adjacent = function adjacent() {
                             var args = Array.from(arguments),
                                 composer = args.pop();
                             return function adj_generated(token_stream) {
                                 var pos = token_stream.tell(),
                                     elems,
-                                    elemss = [], 
+                                    elemss = [],
                                     i;
                                 for (i = 0; i < args.length; i++) {
                                     if (args[i].name === undefined) {
@@ -615,12 +613,12 @@ document.addEventListener("DOMContentLoaded", function() {
                             }
                         },
                         // checks for a given thing next to itself one or many times
-                        run = function run(segment, composer) { 
+                        run = function run(segment, composer) {
                             return function run_generated(token_stream) {
                                 var elems,
                                     elemss = [],
                                     i = 0;
-                                if (segment.name === undefined) { 
+                                if (segment.name === undefined) {
                                     if (grammar[segment] === undefined) {
                                         console.error("run could not find at runtime:", segment);
                                     }
@@ -642,30 +640,30 @@ document.addEventListener("DOMContentLoaded", function() {
                             'doc'       : adjacent(run('block', collect('div', {'class': 'formatted'})), tok(undefined), flatten),
                             'block'     : or('list', 'quote', 'text'),
                             'text'      : run('line', collect('div')),
-                            'line'      : adjacent(or(adjacent('span_noblock', run('span', flatten), flatten), 'span_noblock', 'garbage'), run(tok_lit('\n'), flatten), 
+                            'line'      : adjacent(or(adjacent('span_noblock', run('span', flatten), flatten), 'span_noblock', 'garbage'), run(tok_lit('\n'), flatten),
                                 function (elemss) {
                                     var elems = elemss[0].slice();
                                     elemss[1].forEach(function() {
                                         elems.push(document.createElement('br'));
                                     })
                                     return elems;
-                                }), 
-                            'garbage'   : run(or('content', tok_lit('__'), tok_lit('**'), tok_lit('~~'), tok_lit('//'), 
+                                }),
+                            'garbage'   : run(or('content', tok_lit('__'), tok_lit('**'), tok_lit('~~'), tok_lit('//'),
                                                  tok_lit('['), tok_lit('|'), tok_lit(']')), flatten),
                             'span_noblock'      : or('content', 'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext', 'link', 'image'),
-                            'span'      : or('content', run('blockfmt', flatten), 
-                                             'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext', 
+                            'span'      : or('content', run('blockfmt', flatten),
+                                             'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext',
                                              'link', 'image'),
                             'blockfmt'  : or(tok_lit("*"), tok_lit(">")),
                             'underlinetext' : adjacent(tok('__'), run('span', flatten), tok('__'), wrap('u', 1)),
                             'strikethroughtext' : adjacent(tok('~~'), run('span', flatten), tok('~~'), wrap('del', 1)),
                             'boldtext'  : adjacent(tok('**'), run('span', flatten), tok('**'), wrap('b', 1)),
                             'italicstext'   : adjacent(tok('//'), run('span', flatten), tok('//'), wrap('i', 1)),
-                            'link'      : or(adjacent(tok('['), 'url', tok('|'), run('span', flatten), tok(']'), link_composer), 
+                            'link'      : or(adjacent(tok('['), 'url', tok('|'), run('span', flatten), tok(']'), link_composer),
                                              adjacent(tok('['), 'url', tok(']'), link_composer)),
-                            'image'     : adjacent(tok('['), 'url', tok('|'), tok(']'), 
+                            'image'     : adjacent(tok('['), 'url', tok('|'), tok(']'),
                                 function(elemss) {
-                                    var url = elemss[1].map(function(n) { return n.textContent }).join(""), 
+                                    var url = elemss[1].map(function(n) { return n.textContent }).join(""),
                                         elem = document.createElement('img');
                                     elem.setAttribute('src', url);
                                     return [elem];
@@ -675,7 +673,7 @@ document.addEventListener("DOMContentLoaded", function() {
                             'listitem'  : adjacent(tok('*'), run('span', flatten), tok('\n'), wrap('li', 1)),
                             'quote'     : run('quoteitem', collect('div', {'class': 'quote'})),
                             'quoteitem' : adjacent(tok_lit('>'), run('span', flatten), tok_lit('\n'), flatten),
-                            'content'   : function content(token_stream) { 
+                            'content'   : function content(token_stream) {
                                 var tok = token_stream.read(1)[0],
                                     elem;
                                 if (tok !== undefined && tok.is_content) {
@@ -694,10 +692,10 @@ document.addEventListener("DOMContentLoaded", function() {
                     var tokens = [],
                         current_token = [], // Use arrays of characters because you can't decorate normal strings and constructing them is slow
                                             // Tokens other than runs of text are still normal strings.
-                        skip = 1, 
+                        skip = 1,
                         matched = false,
                         stream_pos = 0;
-                    
+
                     for (var pos = 0; pos < source.length; pos += skip) {
                         matched = false,
                         formatting_tokens.forEach(function(t) {
@@ -733,11 +731,11 @@ document.addEventListener("DOMContentLoaded", function() {
                         },
                         "advance": function(n) {
                             stream_pos += n;
-                        }, 
-                        "seek": function(pos) { 
+                        },
+                        "seek": function(pos) {
                             stream_pos = pos;
                         },
-                        "tell": function() { 
+                        "tell": function() {
                             return stream_pos;
                         },
                         "_token": tokens // for debugging.
@@ -751,7 +749,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 parsetree[0].class = "unformatted";
                 parsetree[0].textContent = source;
                 return parsetree[0];
-            } 
+            }
             return parsetree[0];
 
             return elem;
@@ -762,7 +760,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 $npost = $posts.enter()
                         .append('div')
                         .html(d3.select('#template').html()),
-                updatePost = function($post) { 
+                updatePost = function($post) {
                 // Set text, value, and src of elements with these classes to their corresponding data.
                     var fields = ['_rev', '_id', 'owner', 'subject', 'lasted', 'signature', 'threadid'],
                         ownerFields = ['avatar', 'nick', 'title'];
@@ -783,8 +781,8 @@ document.addEventListener("DOMContentLoaded", function() {
                     $post.select('.nick').attr('href', function(d) {
                         return '#profile/' + d.owner;
                     });
-                    $post.attr('class', function(d) { 
-                        if (d.cssclass) return 'post ' + d.cssclass; 
+                    $post.attr('class', function(d) {
+                        if (d.cssclass) return 'post ' + d.cssclass;
                         else return 'post';
                     });
                     $post.classed('mine', function(d) {
@@ -828,7 +826,7 @@ document.addEventListener("DOMContentLoaded", function() {
                                 thread = d3.select('#base_posted .threadid').attr('value');
                             console.log("Saving..");
                             postPost(post, function() {
-                                    // Post has been saved, unhide buttons, 
+                                    // Post has been saved, unhide buttons,
                                     d3.select(posted).classed("posted", false);
                                     posted.querySelector('.subject')
                                         .outerHTML = '<div class="subject"></div>';
@@ -844,7 +842,7 @@ document.addEventListener("DOMContentLoaded", function() {
                                 thread = this.closest('.post').querySelector('.threadid').value;
                             d3.xhr(urls.posts + '/' + id + "?rev=" + rev)
                             .on('error', function(e) {
-                                console.error(e); 
+                                console.error(e);
                                 alert("SHIT POST");
                             })
                             .on('load', function(e) {
@@ -861,10 +859,9 @@ document.addEventListener("DOMContentLoaded", function() {
                             window.location.hash = "posts/" + this.closest('.post').querySelector('.threadid').value;
                         });
                     $post.select('.interject')
-                        .on('click', function(e) { 
+                        .on('click', function(e) {
                         var $nposted = d3.select(document.createElement("div")),
-                            that = this, 
-                            // XXX NEXT UP ON JAVASCRIPT, REPLACE THIS SHIT WITH PLAIN DOM APIS FOR OPTIMAL CLASSINESS
+                            that = this,
                             thread = d3.select('#base_posted .threadid').attr('value')
                             d3.selectAll('#posts .interject').style('display', 'none');
                             $nposted.html(d3.select('#template').html())
@@ -906,15 +903,11 @@ document.addEventListener("DOMContentLoaded", function() {
                         });
                 };
             console.log("RENDERING POSTS:", posts);
-            // Delete posts that no longer exist
-            $posts.exit().remove(); 
-            // Update the new post
+            $posts.exit().remove();
             updatePost($npost);
-            // Update an existing post
             updatePost($posts);
-            d3.selectAll('#posts .post:not(.interjection) .interject').style('display', 'initial');
             $posts.order();
-
+            d3.selectAll('#posts .post:not(.interjection) .interject').style('display', 'initial');
             // Set up the reply editor
             d3.select("#base_posted")
                 .style('display', 'block')
@@ -943,6 +936,15 @@ document.addEventListener("DOMContentLoaded", function() {
         routes = {
             'login': function() {
                 var $login_page = d3.select(this);
+                $login_page.select('button.logout').on('click', function() {
+                    d3.xhr(urls.session, function(response) {
+                        delete users[user];
+                        user = "";
+                        $login_page.select('.loggedon').style('display', 'none');
+                        d3.selectAll('#posts div.post').remove()
+                    })
+                    .send('DELETE');
+                });
                 $login_page.select('button.login').on('click', function() {
                     var username = $login_page.select('.username').property('value'),
                         password = $login_page.select('.password').property('value');
@@ -964,7 +966,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     })
                     .header('Content-Type', 'application/json')
                     .send('POST', JSON.stringify({
-                        'name': username, 
+                        'name': username,
                         'password': password}));
                 });
                 d3.xhr(urls.session)
@@ -990,8 +992,8 @@ document.addEventListener("DOMContentLoaded", function() {
                         signature = $register_page.select('input.signature').property('value'),
                         avatar = $register_page.select('input.avatar').property('value'),
                         password = $register_page.select('input.password').property('value'),
-                        password2 = $register_page.select('input.password2').property('value');
-
+                        password2 = $register_page.select('input.password2').property('value'),
+                        passcode = $register_page.select('input.passcode').property('value');
                     if (password != password2) {
                         alert('Passwords do not match');
                         return;
@@ -1023,7 +1025,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         })
                         .header('Content-Type', 'application/json')
                         .send('POST', JSON.stringify({
-                            'name': username, 
+                            'name': username,
                             'password': password}));
                     })
                     .on('error', function(resp) {
@@ -1040,8 +1042,8 @@ document.addEventListener("DOMContentLoaded", function() {
                         'nick': nick,
                         'signature': signature,
                         'avatar': avatar,
+                        'passcode': passcode,
                     }));
-
                 });
             },
             'posts': function(post) {
@@ -1083,35 +1085,36 @@ document.addEventListener("DOMContentLoaded", function() {
                     $profile_page.selectAll('span').style('display', user == username ? 'none' : 'inline');
                     $profile_page.selectAll('div').style('display', user == username ? 'none' : 'inline');
 
-                    $profile_page.select('button.save').style('display', user == username ? 'inline' : 'none')
+                    $profile_page.select('button.save')
+                    .style('display', user == username ? 'inline' : 'none')
                     .on('click', function() {
                         var fields = {
-                            'type': 'user',
-                            'nick': $profile_page.select('input.nick').property('value'),
-                            'avatar': $profile_page.select('input.avatar').property('value'),
-                            'signature': $profile_page.select('textarea.signature').property('value'),
-                            'password': $profile_page.select('input.password2').property('value')
+                                'type': 'user',
+                                'nick': $profile_page.select('input.nick').property('value'),
+                                'avatar': $profile_page.select('input.avatar').property('value'),
+                                'signature': $profile_page.select('textarea.signature').property('value'),
+                                'password': $profile_page.select('input.password2').property('value')
                             },
                             inherited_fields = ['_rev', '_id', 'roles', 'name'],
                             password_fields = ['derived_key', 'salt', 'iterations', 'password_scheme'],
                             invalidate_session = true;
-                        
+
                         if (fields.password != $profile_page.select('input.password').property('value')) {
                             alert("Passwords don't match.");
                             return
                         }
-                        if (!fields.password) { // If there's no password change, pass through the old password fields 
+                        if (!fields.password) { // If there's no password change, pass through the old password fields
                             delete fields.password;
                             inherited_fields = inherited_fields.concat(password_fields);
                             invalidate_session = false;
-                        } 
+                        }
                         inherited_fields.forEach(function(key) {
                             fields[key] = users[user][key];
                         });
                         console.debug("Updating user", user, "to", fields);
                         d3.xhr(urls.users + '/' + encodeURIComponent('org.couchdb.user:' + user))
                         .on('load', function(resp) {
-                            delete users[username]; 
+                            delete users[username];
                             if (invalidate_session) {
                                 d3.xhr(urls.session)
                                 .on('load', function(resp) {
@@ -1146,7 +1149,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 .on('click', function() {
                     $help_page.select('div.help')
                         .html("")
-                        .append(function() { 
+                        .append(function() {
                             return format($help_page.select('textarea.help').property('value'))
                         });
                 })
@@ -1187,7 +1190,7 @@ document.addEventListener("DOMContentLoaded", function() {
     <p class="loggedon"><span>Currently logged in as: </span><span class="user" /></p>
     <p><span>Username:</span><input type="text" class="username" /></p>
     <p><span>Password:</span><input type="password" class="password" /></p>
-    <button class="login">login</button>
+    <button class="login">login</button> <button class="logout">logout</button>
 </div>
 <div id="register_page" class="page">
     <p><span>Username (login and URL, immutable):</span><input type="text" class="username" /></p>
@@ -1196,6 +1199,7 @@ document.addEventListener("DOMContentLoaded", function() {
     <p><span>Image URL (not required):</span><input type="text" class="avatar" /></p>
     <p><span>Password:</span><input type="password" class="password" /></p>
     <p><span>Password:</span><input type="password" class="password2" /></p>
+    <p><span>Magic Passcode:</span><input type="text" class="passcode" /></p>
     <button class="register">register</button>
 </div>
 <div id="posts_page" class="page">
@@ -1233,7 +1237,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 </div>
             </div>
         </div>
-        <div class="post replyed" style="display: none" id="base_posted"> 
+        <div class="post replyed" style="display: none" id="base_posted">
             <div class="header">
                 <div class="miniprofile">
                     <img class="avatar" src="" />
@@ -1287,8 +1291,7 @@ document.addEventListener("DOMContentLoaded", function() {
 </div>
 <div id="help_page" class="page">
     <div class="help"></div>
-    <br />
-    <hr />
+    <br /> <hr />
     <textarea class="help">
 Press "render" below to see what the contents of this box would look like as a post
 __this is some underlinetext__
@@ -1296,21 +1299,19 @@ __this is some underlinetext__
 ~~this is some strikethroughtext~~
 //this is some italicstext//
 You can combine them: //like __this__//
-*This 
+*This
 *is
 *a
 *list
 >this is a quote
 A link: [https://google.com]
 And a picture of a hat: [./prophat.jpg|]
-    </textarea>
-    <br />
+    </textarea><br />
     <button class="render">Render</button>
 </div>
 </body>
 <script>
 "use strict";
-// Global configuration
 var urls = {
     "posts": "/posts",
     "uuids": "/_uuids",

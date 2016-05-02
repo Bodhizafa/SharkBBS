@@ -65,7 +65,7 @@ documents_by_url = expand_scripts({
         'validate_doc_update': "function (newDoc, oldDoc, userCtx, secObj) { if (userCtx.name == 'root') return true; else throw {forbidden:'nope'}}"
     },
     '/static/sys': {},
-    '/posts/root': })
+})
 
 # If couchdb presented _rev for security docs, this wouldn't be a special case
 secdocs_by_db  = {

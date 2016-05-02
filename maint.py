@@ -1,5 +1,6 @@
+#!/usr/bin/env python3
 import argparse
-import http.client 
+import http.client
 import base64
 import traceback
 import json
@@ -8,10 +9,10 @@ import mimetypes
 
 gargs = None
 parser = argparse.ArgumentParser()
-parser.add_argument('--user', type=str, default='root')
 parser.add_argument('--passwd', type=str, default='berfberfberfberf')
 parser.add_argument('--host', type=str, help='Host to connect to',
                     default='localhost:5984')
+parser.add_argument('--initialize', action='store_true', help='Create databases and try to set root password')
 
 class Script(object):
     def __init__(self, filename):
@@ -24,6 +25,23 @@ def expand_scripts(doc):
         return {k: expand_scripts(v) for k, v in doc.items()}
     else:
         return doc
+
+root_user = {
+    'name': 'root',
+    'nick': 'root',
+    'avatar': '/static/sys/prophat.jpg',
+    'type': 'user',
+    'password': None,
+    'roles': [ 'admin' ],
+    'signature': 'When one has much to put into them, a day has a hundred pockets\n- Nietzsche ',
+}
+root_post = {
+   'owner': 'root',
+   'subject': 'Beans',
+   'content': 'Beans',
+   'created': '2016-04-20T04:20:00.000Z',
+   'lasted': '2016-04-20T04:20:00.000Z'
+}
 
 documents_by_url = expand_scripts({
     '/posts/_design/posts': {
@@ -39,56 +57,49 @@ documents_by_url = expand_scripts({
         }
     },
 	'/_users/_design/users': {
-        "language": "javascript",
-        "validate_doc_update": Script('users_vdo.js'),
+        'language': 'javascript',
+        'validate_doc_update': Script('users_vdo.js'),
     },
 	'/static/_design/static': {
-        "language": "javascript",
-        "validate_doc_update": "function (newDoc, oldDoc, userCtx, secObj) { if (userCtx.name == 'root') return true; else throw {forbidden:'nope'}}"
+        'language': 'javascript',
+        'validate_doc_update': "function (newDoc, oldDoc, userCtx, secObj) { if (userCtx.name == 'root') return true; else throw {forbidden:'nope'}}"
     },
     '/static/sys': {},
-    '/posts/root': {
-       "owner": "root",
-       "subject": "Beans",
-       "content": "Beans",
-       "created": "2016-04-20T04:20:00.000Z",
-       "lasted": "2016-04-20T04:20:00.000Z"
-    },
-})
+    '/posts/root': })
 
 # If couchdb presented _rev for security docs, this wouldn't be a special case
-secdocs_by_db  = { 
+secdocs_by_db  = {
     'static': {
-        "_id": "_security",
-        "members": {
-            "names": [ ],
-            "roles": [ ]
+        '_id': '_security',
+        'members': {
+            'names': [ ],
+            'roles': [ ]
         },
-        "admins": {
-            "names": [ ],
-            "roles": [ ]
+        'admins': {
+            'names': [ ],
+            'roles': [ ]
         }
     },
     '_users': {
-        "_id": "_security",
-        "members": {
-            "names": [ ],
-            "roles": [ ]
+        '_id': '_security',
+        'members': {
+            'names': [ ],
+            'roles': [ ]
         },
-        "admins": {
-            "names": [ ],
-            "roles": [ ]
+        'admins': {
+            'names': [ ],
+            'roles': [ ]
         }
     },
     'posts': {
-        "_id": "_security",
-        "members": {
-            "names": [ ],
-            "roles": [ ]
+        '_id': '_security',
+        'members': {
+            'names': [ ],
+            'roles': [ ]
         },
-        "admins": {
-            "names": [ ],
-            "roles": [ "admin" ]
+        'admins': {
+            'names': [ ],
+            'roles': [ 'admin' ]
         }
     },
 }
@@ -99,7 +110,7 @@ sys_attachments = [
 ]
 config_by_name = {
 	'couch_httpd_auth/users_db_public': '"true"',
-	'couch_httpd_auth/public_fields': '"nick, title, avatar, signature"', 
+	'couch_httpd_auth/public_fields': '"nick, title, avatar, signature"',
     'couch_httpd_auth/allow_persistent_cookies': '"true"',
     'couch_httpd_auth/timeout': '"86400"',
 }
@@ -116,19 +127,20 @@ class Conflict(CouchException):
     pass
 class Forbidden(CouchException):
     pass
+class Unauthorized(CouchException):
+    pass
 class OutOfBandModification(Exception):
     pass
 exctypes_by_status = {
+    401: Unauthorized,
     404: NotFound,
     409: Conflict,
     403: Forbidden,
 }
 
-def req_with_auth(method, url, body=None, headers=None):
+def req(method, url, body=None, headers=None):
     if headers is None:
         headers = {}
-    if 'Authorization' not in headers:
-        headers['Authorization'] = 'Basic %s' % base64.b64encode(bytes('%s:%s' % (gargs.user, gargs.passwd), 'ascii')).decode('ascii')
     conn = http.client.HTTPConnection(gargs.host)
     req = conn.request(method, url, body=body, headers=headers)
     resp = conn.getresponse()
@@ -140,6 +152,12 @@ def req_with_auth(method, url, body=None, headers=None):
     if resp.status // 100 != 2:
         raise exctypes_by_status[resp.status](url, doc)
     return doc
+
+def req_with_auth(method, url, body=None, headers=None):
+    if headers is None:
+        headers = {}
+    headers['Authorization'] = 'Basic %s' % base64.b64encode(bytes('%s:%s' % ('root', gargs.passwd), 'ascii')).decode('ascii')
+    return req(method, url, body, headers)
 
 def put_doc(url, doc): # doc should be a dict
     resp = req_with_auth('PUT', url, json.dumps(doc), {'Content-Type': 'application/json'})
@@ -161,6 +179,22 @@ if __name__ == '__main__':
         gargs = parser.parse_args()
         print('SharkBBS maintainence script attempt 3, codename \'I still hate couchdb\'')
         print('Aguments: %r' % gargs)
+        if gargs.initialize:
+            root_user_url = '/_users/org.couchdb.user:root'
+            conn = http.client.HTTPConnection(gargs.host)
+            doc = req('PUT', '/_config/admins/root', body='"%s"' % gargs.passwd)
+            print('Created admin.')
+            try:
+                old_doc = req_with_auth('GET', root_user_url)
+                raise OutOfBandModification('Root user already exists: %r' % old_doc)
+            except NotFound:
+                root_user['password'] = gargs.passwd
+                put_doc(root_user_url, root_user)
+                put_doc(root_post_url, root_post)
+                print('Created root user.')
+            req_with_auth('PUT', "/static")
+            req_with_auth('PUT', "/posts")
+
         for url, doc in documents_by_url.items():
             try:
                 old_doc = req_with_auth('GET', url)
@@ -188,13 +222,13 @@ if __name__ == '__main__':
         for filename in sys_attachments:
             mimetype, encoding = mimetypes.guess_type(filename)
             if mimetype is None:
-                raise TypeError("Could not determine mime type of %s" % filename)
-            doc = req_with_auth('PUT', '/static/sys/%s?rev=%s' % (filename, sys_rev), body=open(filename, 'rb').read(), headers={"Content-Type": mimetype})
-            print("Uploaded attachment %s got %s" % (filename, doc))
+                raise TypeError('Could not determine mime type of %s' % filename)
+            doc = req_with_auth('PUT', '/static/sys/%s?rev=%s' % (filename, sys_rev), body=open(filename, 'rb').read(), headers={'Content-Type': mimetype})
+            print('Uploaded attachment %s got %s' % (filename, doc))
             sys_rev = doc['rev']
         for key, value in config_by_name.items():
             doc = req_with_auth('PUT', '/_config/%s' % key, body=value, headers={'Content-Type': 'application/json'})
-            print("Set config %s from %s to %s" % (key, doc, value))
+            print('Set config %s from %s to %s' % (key, doc, value))
     except:
         traceback.print_exc()
     finally:

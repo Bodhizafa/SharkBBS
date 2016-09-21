@@ -257,7 +257,7 @@ threadid is the id of the thread you would be replying to if you hit 'reply'.
 |-  means: threadid points to ID of post in the column where | is.
 |-- means: '' and also this is an interjection on the |-'d post closest above it (its parentid points there)
 
-"root" (default threadid)
+"0" (default threadid)
 -(Reply0)                       # Reply0 is the OP (post with _id = threadid)
 |-Reply1
 |-Reply2                        # There is no Reply2Int0.
@@ -305,6 +305,11 @@ document.addEventListener("DOMContentLoaded", function() {
             console.log("Priming usrs cache, cookie:", document.cookie);
             // Build a list of users we don't have in 'users,' then make a request if there actually are any
             usernames.forEach(function(username) {
+                if (user == username) {
+                    if (users[user] && users[user]._id === undefined) {
+                        delete users[user];
+                    }
+                }
                 if (!users[username]) {
                     uncached_by_username["org.couchdb.user:" + username] = true;
                 }
@@ -315,7 +320,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 d3.json(urls.users + '/' + encodeURIComponent('org.couchdb.user:' + user),  function(d) {
                     users[user] = d;
                     console.debug("Primed cache for logged in user", d);
-                    if (!d.password_scheme) {
+                    if (!d._id) {
                         console.error("Did not get full user doc for ", user);
                     }
                     log_cb();
@@ -957,9 +962,6 @@ document.addEventListener("DOMContentLoaded", function() {
                         }
                         console.log('Successful login', response);
                         user = username;
-                        if (users[user]) {
-                            delete users[user]
-                        }
                         primeUsers([user], function() {
                             window.location.hash = 'posts/root';
                         });

@@ -1,0 +1,8 @@
+{"children": {
+    "posts": [{
+        "query": "SELECT * FROM posts"
+    }, {
+        "query": "SELECT * FROM posts WHERE threadid=?",
+        "params": ["thread_id"]
+    }]
+}}

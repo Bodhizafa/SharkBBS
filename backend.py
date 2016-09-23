@@ -2,17 +2,12 @@
 # vim: set fileencoding:utf-8
 
 """
-Copyright Landon Meernik
-
 ==The Backend
 I hate writing backends, but it turns out I hate learning other people's even more.
 By that I mean holy shit couchdb is a steaming pile of bedbug ridden, semen stained,
 cat piss smelling, mold infested, springs-showing, damp garbage from under a bridge.
 Because of this, I am forced to write this thing. In theory it's pretty damn general
 and I hope I won't have to to it again.
-
-This file is hate shrine to it, because I tried desparately to use it for this, and
-it sucked too damn hard.
 """
 
 """
@@ -92,10 +87,12 @@ Pattern matched list nodes cannot have children.
 """
 
 import http.server
+import http.cookie
 import urllib.parse
 import argparse
 import json
 import sqlite3
+import hashlib
 from collections import Counter
 
 parser = argparse.ArgumentParser("Shark Backend. Bites users occasionally")
@@ -103,6 +100,8 @@ parser = argparse.ArgumentParser("Shark Backend. Bites users occasionally")
 parser.add_argument("--ns", type=argparse.FileType('r'), help="JSON namespace file")
 parser.add_argument("--initsql", type=argparse.FileType('r'), help="SQL file to execute upon startup")
 parser.add_argument("--db", type=str, help="sqlite db file")
+parser.add_argument("--domain", type=str, help="What domain we should associate cookies with", default="mindshark.camp")
+parser.add_argument("--session_length", type=int, help="how many hours do sessions last", default=6)
 parser.add_argument("--port", type=int, help="port to listen on", default=3103)
 parser.add_argument("--skip", type=int, help="ignore this many non-empty path elements (for when you have this nested under some nginx proxy)", default=1)
 
@@ -110,6 +109,9 @@ class NotFoundError(LookupError):
     pass
 
 class BadParamsError(LookupError):
+    pass
+
+class AuthenticationError(Exception):
     pass
 
 class Encoder(json.JSONEncoder):
@@ -122,14 +124,35 @@ class Encoder(json.JSONEncoder):
             return json.JSONEncoder.default(self, obj)
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):
-    def respond(self, obj, code=200):
+    def error(self, code, exc, cookie=None):
+        self.respond({"error": str(type(e)), "value": str(e)}, code, cookie)
+    def respond(self, obj, code=200, cookie=None):
+        """
+        cookie should be a dict, entries which are "None" will be deleted
+        """
         self.send_response(code)
         self.send_header('Content-Type', "application/json")
+        if cookie is not None:
+            c = http.cookie.SimpleCookie(cookie)
+            for k in cookie.keys():
+                c[k]['httponly'] = True
+                c[k]['secure'] = True
+                c[k]['version'] = 1
+                c[k]['path'] = '/'
+                c[k]['domain'] = self.server.domain
+                c[k]['comment'] = 'YOU DID THIS TO ME'
+                if cookie[k] is not None:
+                    c[k]['max-age'] = self.server.session_length*60*60 # 6 hours
+                else:
+                    c[k]['expires'] = 1
+            self.send_header("Set-Cookie", c.output(headers='')
+        self.send_header("Cache-Control", 'no-cache="set-cookie"')
+        self.send_header("Cache-Control", 'private')
         self.end_headers()
         s = json.dumps(obj, indent=2, ensure_ascii=True, cls=Encoder)
         self.wfile.write(s.encode('ascii'))
 
-    def do_GET(self):
+    def do_req(self, reqtype):
         res = urllib.parse.urlparse(self.path)
         params = { # urlparse passes EVERYTHING back as a list, this extracts singletons.
             key : val[0] if len(val) == 1 else val
@@ -137,38 +160,109 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
         }
         path = [pe for pe in res.path.split("/") if pe][self.server.skip:];
         if not path:
-            self.respond(self.server.ns)
+            self.respond(self.server.ns, 404)
             return
-        try:
-            query, porder = self.server.get_query(path, params)
-            dc = self.server.dbconn.cursor()
-            if porder is not None:
-                dc.execute(query, [params[k] for k in porder])
+        users_id = None
+        roles = set([])
+        sessions_id = None
+        cookie = http.cookie.SimpleCookie(self.headers['Cookie'])
+        if 'sessions_id' in cookie:
+            sessions_id = cookie['sessions_id'].value
+            mdc = server.mem_dbconn.cursor()
+            mdc.execute("""SELECT sessions.users_id, roles.role FROM sessions
+                                INNER JOIN users ON sessions.users_id = users.id
+                                LEFT JOIN roles ON roles.users_id=users.id
+                            WHERE sessions.created > date('now', '-%d hours')
+                                AND users.id = ?""" % self.server.session_length,
+                        (sessions_id,))
+            rows = mdc.fetchall()
+            if not rows:
+                self.error(401,
+                           AuthenticationError("No such valid session"),
+                           cookie={"sessions_id":None})
+                return
             else:
-                dc.execute(query)
-            names = [name for name, _, _, _, _, _, _ in dc.description]
-            res = [dict(zip(names, vals)) for vals in dc.fetchall()]
-            self.respond(res)
-        except sqlite3.OperationalError as e:
-            self.respond({"error": str(type(e)), "value": str(e)}, 500)
-        except NotFoundError as e:
-            self.respond({"error": str(type(e)), "value": str(e)}, 404)
+                user = rows[0][0]
+                for user, role in rows:
+                    roles.add(role)
+
+        # okay we're logged in and path is parsed
+        if reqtype in ['GET', 'POST']:
+            if path[0] == "_sessions":
+                if 'user' in params:
+                    try:
+                        password = params['password']
+                        user = params['user']
+                        sessid = self.server.get_sessid(user, password)
+                        if sessid is None:
+                            self.error(401, AuthenticationError('Improper credentials'))
+                        else:
+                            self.respond(None, cookie={"sessions_id": sessid})
+                            return
+                    except KeyError as e:
+                        self.error(400, e)
+                        return
+            try:
+                qmap = self.server.get_query(path, params)
+                query = qmap['query']
+                porder = qmap['params']
+                role = qmap['role']
+                if role not in roles:
+                    self.error(AuthenticationError("You cannot get ye flask"))
+                    return
+                dc = self.server.dbconn.cursor()
+                if porder is not None:
+                    dc.execute(query, [params[k] for k in porder])
+                else:
+                    dc.execute(query)
+                names = [name for name, _, _, _, _, _, _ in dc.description]
+                res = [dict(zip(names, vals)) for vals in dc.fetchall()]
+                dc.execute("COMMIT")
+                self.respond(res)
+            except sqlite3.OperationalError as e:
+                self.error(500, e)
+            except NotFoundError as e:
+                self.error(404, e)
+            return
+        elif reqtype == ['DELETE']
+            if path[0] != "_sessions" or sessions_id is None:
+                self.error(501, NotImplementedError("DELETE only supported for sessions"))
+                return
+            mdc = self.server.mem_dbconn.cursor()
+            mdc.execute("DELETE FROM sessions WHERE id=?" (sessions_id,))
+            mdc.execute("COMMIT")
+            self.respond(None, cookie={'sessions_id':None})
+            return
+
+        self.error(501, NotImplementedError("method not supported"))
+
+    def do_GET(self):
+        self.do_req('GET');
 
     def do_POST(self):
-        print("got a POST request")
-        self.respond({"error": str(NotImplementedError), "value": "Not Implemented"}, 501)
+        self.do_req('POST');
 
     def do_PUT(self):
-        print("got a PUT request")
-        self.respond({"error": str(NotImplementedError), "value": "Not Implemented"}, 501)
+        self.do_req('PUT');
 
     def do_DELETE(self):
-        print("got a DELETE request")
-        self.respond({"error": str(NotImplementedError), "value": "Not Implemented"}, 501)
+        self.do_req('DELETE');
 
 class Server(http.server.HTTPServer):
-    def __init__(self, port, ns, db, initsql, skip):
+    def __init__(self, port, ns, db, initsql, skip, domain, session_length):
         self.dbconn = sqlite3.connect(db)
+        self.domain = domain
+        self.session_length = session_length
+        self.mem_dbconn = sqlite3.connect(":memory:")
+        mdc = self.mem_dbconn.cursor()
+        self.sr = random.SystemRandom()
+        mdc.execute("""
+            CREATE TABLE sessions (
+                id INTEGER PRIMARY KEY,
+                users_id TINYTEXT,
+                created TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         self.ns = json.load(ns)
         self.skip = skip
         if initsql:
@@ -176,6 +270,30 @@ class Server(http.server.HTTPServer):
             dc.executescript(initsql.read())
             dc.close()
         super().__init__(('', port), RequestHandler)
+
+    def hash_password(self, password):
+        s = hashlib.sha256()
+        m.update(password)
+        return s.digest()
+
+    def get_sessid(self, user, password):
+        dc = self.dbconn.cursor()
+        dc.execute("SELECT id, password_sha256 FROM users WHERE id=?", (user,))
+        rows = dc.fetchall()
+        if not rows:
+            return None
+        users_id, correct_hash = rows[0]
+        if correct_hash == self.hash_password(password):
+            mdc = self.mem_dbconn.cursor()
+            sessid = self.sr.getrandbits(64)
+            while True:
+                try:
+                    mdc.execute("INSERT INTO sessions (id, users_id) VALUES (?, ?)", (sessid, users_id))
+                    break
+                except sqlite3.IntegrityError: # cances of this happening are absurdly small
+                    sessid = self.sr.getrandbits(64)
+                    continue
+            return sessid
 
     def get_query(self, path, params):
         """
@@ -196,9 +314,9 @@ class Server(http.server.HTTPServer):
             if Counter(qmap['params']) != params_present_counter:
                 raise BadParamsError("Parameters %r do not match query params: %r" % (params, qmap))
             if 'params' in qmap and qmap['params']:
-                return qmap['query'], qmap['params']
+                return qmap
             else:
-                return qmap['query'], None
+                return qmap
 
         if 'query' in cur:
             return try_query(cur)
@@ -212,11 +330,11 @@ class Server(http.server.HTTPServer):
                 except BadParamsError:
                     pass
             raise BadParamsError("Cannot find query for params: %r in path %s" % (params, path))
+
 def main(**args):
-    s = Server(**args)
-    print("calling serve_forever")
-    s.serve_forever()
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    main(**vars(args))
+    s = Server(**vars(args))
+    print("serving forever")
+    s.serve_forever()

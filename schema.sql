@@ -1,19 +1,18 @@
-DROP TABLE IF EXISTS passwords;
-CREATE TABLE passwords (
-    id INTEGER PRIMARY KEY ASC,
-    hash SMALLBLOB,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 DROP TABLE IF EXISTS users;
 CREATE TABLE users (
     id TINYTEXT PRIMARY KEY,
     nick TINYTEXT,
     avatar TINYTEXT,
     signature TEXT,
-    passwords_id INTEGER,
-    FOREIGN KEY(passwords_id) REFERENCES passwords(id)
+    password_sha256 SMALLBLOB,
 );
+
+DROP TABLE IF EXISTS roles;
+CREATE TABLE roles (
+    users_id TINYTEXT,
+    role TINYTEXT,
+    FOREIGN KEY(users_id) REFERENCES users(id)
+)
 
 DROP TABLE IF EXISTS posts;
 CREATE TABLE posts (
@@ -31,6 +30,12 @@ INSERT INTO passwords (id, hash) VALUES
 
 INSERT INTO users VALUES
     ("root", "DJ Testio", "/prophat.jpg", "When one has a great deal to put into it, a day has a hundred pockets.\n\t- Nietzsche", 1);
+
+INSERT INTO roles VALUES
+    ('root', 'admin')
+    ('root', 'moderator')
+    ('root', 'poster')
+    ('root', 'reader')
 
 INSERT INTO posts VALUES
     (0, "root", 0, "ROOT POST TEST");

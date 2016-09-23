@@ -1,8 +1,10 @@
 {"children": {
     "posts": [{
-        "query": "SELECT * FROM posts"
+        "query": "SELECT * FROM posts",
+        "role": "reader"
     }, {
         "query": "SELECT * FROM posts WHERE threadid=?",
-        "params": ["thread_id"]
+        "params": ["thread_id"],
+        "role": "reader"
     }]
 }}

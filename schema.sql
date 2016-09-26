@@ -2,6 +2,7 @@ DROP TABLE IF EXISTS users;
 CREATE TABLE users (
     id TINYTEXT PRIMARY KEY,
     nick TINYTEXT,
+    title TINYTEXT,
     avatar TINYTEXT,
     signature TEXT,
     password_sha256 SMALLBLOB
@@ -33,7 +34,7 @@ CREATE TABLE sessions (
 );
 
 INSERT INTO users VALUES
-    ("root", "DJ Testio", "/prophat.jpg", "When one has a great deal to put into it, a day has a hundred pockets.\n\t- Nietzsche", "6eb228fb5b59ab49a45a48bdd9e5f0ed65b43afb52ec72cc825a567986630827");
+    ("root", "DJ Testio", "data victim", "/prophat.jpg", "When one has a great deal to put into it, a day has a hundred pockets.\n\t- Nietzsche", "6eb228fb5b59ab49a45a48bdd9e5f0ed65b43afb52ec72cc825a567986630827");
 
 INSERT INTO roles VALUES
     ('root', 'admin'),

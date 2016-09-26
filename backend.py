@@ -95,6 +95,7 @@ import sqlite3
 import hashlib
 import random
 import base64
+from itertools import starmap
 from collections import Counter
 
 parser = argparse.ArgumentParser("Shark Backend. Bites users occasionally")
@@ -126,9 +127,9 @@ class Encoder(json.JSONEncoder):
             return json.JSONEncoder.default(self, obj)
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):
-    def error(self, code, e, cookie=None):
+    def error(self, code, e, cookie=None, headers=None):
         self.respond({"error": str(type(e)), "value": str(e)}, code, cookie)
-    def respond(self, obj, code=200, cookie=None):
+    def respond(self, obj, code=200, cookie=None, headers=None):
         """
         cookie should be a dict, entries which are "None" will be deleted
         """
@@ -149,6 +150,8 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", c.output(header=''))
         self.send_header("Cache-Control", 'no-cache="set-cookie"')
         self.send_header("Cache-Control", 'private')
+        if headers is not None:
+            starmap(self.send_header, headers.items())
         self.end_headers()
         s = json.dumps(obj, indent=2, ensure_ascii=True, cls=Encoder)
         self.wfile.write(s.encode('ascii'))
@@ -168,29 +171,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
         sessions_id = None
         cookie = http.cookies.SimpleCookie(self.headers['Cookie'])
         dc = self.server.dbconn.cursor()
-        if path[0] == '_sessions':
-            if reqtype == 'GET':
-                auth = self.headers['Authorization']
-                if not auth or not auth.lower().startswith("basic "):
-                    self.send_header('WWW-Authenticate', 'Basic realm="Stay out!"')
-                    self.error(401, BadParamsError('user or password missing'))
-                    return
-                user, password = base64.b64decode(auth.split(' ')[1]).decode('ascii').split(':', maxsplit=1)
-                print("auith headers: ", user, password)
-                if sessid is None:
-                    self.error(401, AuthenticationError('Improper credentials'))
-                else:
-                    self.respond(None, cookie={"sessions_id": sessid})
-                return
-            if reqtype == 'DELETE':
-                if 'sessions_id' not in cookie:
-                    self.respond(None, cookie={'sessions_id':None})
-                    return
-                dc = self.server.dbconn.cursor()
-                dc.execute("DELETE FROM sessions WHERE id=?" (cookie['sessions_id'],))
-                self.respond(None, cookie={'sessions_id':None})
-                return
-        elif 'sessions_id' in cookie:
+        if 'sessions_id' in cookie:
             sessions_id = cookie['sessions_id'].value
             dc.execute("""SELECT users.id, roles.role FROM sessions
                             JOIN users ON users.id = sessions.users_id
@@ -198,16 +179,48 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
                             WHERE sessions.created > date('now', '-%d hours') AND sessions.id = ?""" % self.server.session_length,
                         (sessions_id,))
             rows = dc.fetchall()
-            if not rows:
+            if not rows and path[0] != '_sessions':
                 self.error(401,
                            AuthenticationError("No such valid session"),
                            cookie={"sessions_id":None})
                 return
-            else:
-                user = rows[0][0]
+            elif rows:
+                users_id = rows[0][0]
                 for user, role in rows:
                     roles.add(role)
-                print("Session id %s recognized :D, user %s has roles %r" % (sessions_id, user, roles))
+                print("Session id %s recognized :D, user %s has roles %r" % (sessions_id, users_id, roles))
+        if path[0] == '_sessions':
+            if reqtype == 'GET':
+                auth = self.headers['Authorization']
+                # If we don't auth or do it wrong and we're not logged in
+                if (not auth or auth and not auth.lower().startswith("basic ")) and users_id is None:
+                    self.error(401, BadParamsError('user or password missing'),
+                               headers={'WWW-Authenticate': 'Basic realm="Stay out!"'})
+                    return
+                # logging in
+                if auth:
+                    user, password = base64.b64decode(auth.split(' ')[1]).decode('ascii').split(':', maxsplit=1)
+                    sessid = self.server.get_session(user, password)
+                    if sessid is None:
+                        self.error(401, AuthenticationError('Improper credentials'))
+                    else:
+                        dc.execute("SELECT role FROM roles WHERE users_id = ?", (user, ))
+                        roles = {row[0] for row in dc.fetchall()}
+                        self.respond({"users_id": user, "roles": list(roles)}, cookie={"sessions_id": sessid})
+                    return
+                # Getting info for an existing session
+                if users_id:
+                    self.respond({"users_id": users_id, "roles": list(roles)})
+                    return
+            if reqtype == 'DELETE':
+                if sessions_id is None:
+                    self.respond(None, cookie={'sessions_id':None})
+                    return
+                dc.execute("DELETE FROM sessions WHERE id=?", (sessions_id,))
+                self.respond(None, cookie={'sessions_id':None})
+                return
+            self.error(400, NotImplementedError("You can only GET or DELETE sessions"))
+            return
 
         # okay we're logged in and path is parsed
         if reqtype in ['GET', 'POST']:
@@ -216,6 +229,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
                 query = qmap['query']
                 porder = qmap['params']
                 role = qmap['role']
+
                 if role not in roles:
                     self.error(401, AuthenticationError("You cannot get ye flask"))
                     return
@@ -256,8 +270,6 @@ class Server(http.server.HTTPServer):
         self.session_length = session_length
         dc = self.dbconn.cursor()
         self.sr = random.SystemRandom()
-        dc.execute("""
-        """)
         self.ns = json.load(ns)
         self.skip = skip
         if initsql:
@@ -271,7 +283,7 @@ class Server(http.server.HTTPServer):
         s.update(password.encode('utf8'))
         return s.hexdigest()
 
-    def get_sessid(self, user, password):
+    def get_session(self, user, password):
         dc = self.dbconn.cursor()
         dc.execute("SELECT id, password_sha256 FROM users WHERE id=?", (user,))
         rows = dc.fetchall()
@@ -286,9 +298,7 @@ class Server(http.server.HTTPServer):
                     break
                 except sqlite3.IntegrityError: # cances of this happening are absurdly small
                     sessid = self.sr.getrandbits(64)
-                    continue
             return sessid
-
     def get_query(self, path, params):
         """
         Return the query asked for by path that matches the given param names

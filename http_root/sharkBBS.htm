@@ -288,16 +288,12 @@ var users = { // User data. Users missing these fields may not render correctly.
 document.addEventListener("DOMContentLoaded", function() {
     var user = "", // Current logged in username (key in _users, without 'org.couchdb.user:')
         primeUsers = (function(usernames, cb) {
-        // `usernames` should be an array without org.couchdb.user: cb will be invoked when they are all
-        // in `users` Sometimes this needs two parallel requests because in couchdb, requesting all_docs
-        // doesn't actually give you the same document as requesting it directly would in the case
-        // of asking for your own users document, and we need some non-public fields on users[user] so we can
-        // update the profile, so we get that one differently.
+        // `usernames` should be an array of usernames, cb will be invoked when they are all in `users`
             var uncached_by_username = {},
-                requests = 1,
+                requests = 0,
                 log_cb = (function() {
                     requests--;
-                    if (requests == 0) {
+                    if (requests <= 0) {
                         console.debug("Primed users cache for ", usernames, "as", user, "result: ", users);
                         cb();
                     }
@@ -305,58 +301,38 @@ document.addEventListener("DOMContentLoaded", function() {
             console.log("Priming usrs cache, cookie:", document.cookie);
             // Build a list of users we don't have in 'users,' then make a request if there actually are any
             usernames.forEach(function(username) {
-                if (user == username) {
-                    if (users[user] && users[user]._id === undefined) {
-                        delete users[user];
-                    }
-                }
                 if (!users[username]) {
-                    uncached_by_username["org.couchdb.user:" + username] = true;
+                    uncached_by_username[username] = true;
                 }
             });
-            if (uncached_by_username["org.couchdb.user:" + user]) {
-                requests = requests + 1;
-                delete uncached_by_username['org.couchdb.user:' + user];
-                d3.json(urls.users + '/' + encodeURIComponent('org.couchdb.user:' + user),  function(d) {
-                    users[user] = d;
-                    console.debug("Primed cache for logged in user", d);
-                    if (!d._id) {
-                        console.error("Did not get full user doc for ", user);
-                    }
-                    log_cb();
-                });
-            }
             if (Object.keys(uncached_by_username).length === 0) {
-                console.debug("Users cache hit");
+                console.debug("Users cache hit all");
                 log_cb();
                 return;
             }
-            d3.xhr(urls.users + "/_all_docs?include_docs=true", function(resp) {
-                var rows = JSON.parse(resp.response).rows;
-                rows.forEach(function(row) {
-                    var username;
-                    if (row.error) {
-                        console.error("Error finding user ", username, ":", row);
-                        alert("SHIT POST")
-                    }
-                    username = row.id.replace('org.couchdb.user:', '')
-                    users[username] = row.doc;
-                    users[username]._rev = row.value.rev;
-                    // fill out defaults
-                    Object.keys(users[""]).forEach(function(key) {
-                        if (!users[username][key]) {
-                            users[username][key] = users[""][key];
+            // XXX make backend support getting multiple keys at once. As it is we just make a fuckton of requests.
+            Object.keys(uncached_by_username).forEach(function(username) {
+                requests += 1;
+                d3.xhr("/data/users/?id=" + encodeURIComponent(username), function(resp) {
+                    var rows = JSON.parse(resp.response);
+                    rows.forEach(function(row) {
+                        var username;
+                        if (row.error) {
+                            console.error("Error finding user ", username, ":", row);
+                            alert("SHIT POST")
                         }
+                        username = row.id;
+                        users[username] = row;
                     });
-                });
-                log_cb();
-            })
-            .on("error", function(resp) {
-                console.error("Error priming users cache for ", usernames, ":", resp);
-                alert("SHIT POST!")
-            })
-            .header("Content-Type", "application/json")
-            .send("POST", JSON.stringify({"keys": Object.keys(uncached_by_username)}));
+                    log_cb();
+                })
+                .on("error", function(resp) {
+                    console.error("Error priming users cache for ", usernames, ":", resp);
+                    alert("SHIT POST!")
+                })
+                .header("Content-Type", "application/json")
+                .send("GET");
+            });
         }),
         loadThread = function(new_threadid) {
         // This function works by making three requests. First it makes one for the OP and one for the replies at the same time.
@@ -942,7 +918,7 @@ document.addEventListener("DOMContentLoaded", function() {
             'login': function() {
                 var $login_page = d3.select(this);
                 $login_page.select('button.logout').on('click', function() {
-                    d3.xhr(urls.session, function(response) {
+                    d3.xhr('/data/_sessions', function(response) {
                         delete users[user];
                         user = "";
                         $login_page.select('.loggedon').style('display', 'none');
@@ -954,7 +930,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     var username = $login_page.select('.username').property('value'),
                         password = $login_page.select('.password').property('value');
                     console.log('Attempting login as', username, password);
-                    d3.xhr(urls.session, function(response) {
+                    d3.xhr('/data/_sessions', function(response) {
                         if (response === null) {
                             console.error('Unsuccessful login');
                             alert('Unauthorized!');
@@ -967,22 +943,21 @@ document.addEventListener("DOMContentLoaded", function() {
                         });
                     })
                     .header('Content-Type', 'application/json')
-                    .send('POST', JSON.stringify({
-                        'name': username,
-                        'password': password}));
+                    .header('Authorization', "Basic " + btoa(username + ":" + password))
+                    .send('GET');
                 });
-                d3.xhr(urls.session)
+
+                d3.xhr('/data/_sessions')
                 .on('load', function(resp) {
+                    console.log("Initial login response: ", resp);
                     var doc = JSON.parse(resp.response)
-                    if (doc.userCtx.name) {
-                        user = doc.userCtx.name;
-                    }
-                    if (user) {
-                        $login_page.select('.loggedon').style('display', 'block');
-                        $login_page.select('.user').text(user);
-                    } else {
-                        $login_page.select('.loggedon').style('display', 'none');
-                    }
+                    user = doc.users_id;
+                    $login_page.select('.loggedon').style('display', 'block');
+                    $login_page.select('.user').text(user);
+                })
+                .on('error', function(resp) {
+                    console.log("Initial login error: ", resp.response);
+                    $login_page.select('.loggedon').style('display', 'none');
                 })
                 .send('GET');
             },
@@ -1011,7 +986,7 @@ document.addEventListener("DOMContentLoaded", function() {
                             console.error('Non-201 response', resp);
                         }
                         console.debug('Registered user: ', resp);
-                        d3.xhr(urls.session, function(response) {
+                        d3.xhr('/data/_sessions', function(response) {
                             if (response === null) {
                                 console.error('Unsuccessful login');
                                 alert('Unauthorized!');
@@ -1118,7 +1093,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         .on('load', function(resp) {
                             delete users[username];
                             if (invalidate_session) {
-                                d3.xhr(urls.session)
+                                d3.xhr('/data/_sessions')
                                 .on('load', function(resp) {
                                     if (!user) {
                                         alert("SHIT POST")
@@ -1212,7 +1187,7 @@ document.addEventListener("DOMContentLoaded", function() {
         <div id="template" class="post">
             <div class="header">
                 <div class="miniprofile">
-                    <img src="/static/sys/prophat.jpg" class="avatar">
+                    <img src="prophat.jpg" class="avatar">
                     <a class="nick" href="#profile">DJ Tëstio</a>
                     <div class="title">#E_REKT</div>
                 </div>
@@ -1319,7 +1294,7 @@ var urls = {
     "uuids": "/_uuids",
     "thread": "/posts/_design/posts/_view/thread",
     "post": "/posts/_design/posts/_update/post",
-    "session": "/_session",
+    "session": "/_sessions",
     "users": "/_users"
 }
 if (Element.prototype.closest === undefined) {

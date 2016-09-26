@@ -4,7 +4,7 @@ CREATE TABLE users (
     nick TINYTEXT,
     avatar TINYTEXT,
     signature TEXT,
-    password_sha256 SMALLBLOB,
+    password_sha256 SMALLBLOB
 );
 
 DROP TABLE IF EXISTS roles;
@@ -12,7 +12,7 @@ CREATE TABLE roles (
     users_id TINYTEXT,
     role TINYTEXT,
     FOREIGN KEY(users_id) REFERENCES users(id)
-)
+);
 
 DROP TABLE IF EXISTS posts;
 CREATE TABLE posts (
@@ -24,18 +24,22 @@ CREATE TABLE posts (
     FOREIGN KEY(thread_id) REFERENCES posts(id)
 );
 
-INSERT INTO passwords (id, hash) VALUES
-    (0, NULL),
-    (1, 'b60efdd7fb69c8ef063935f4d7eddad40eb82ee4'); -- "beans"
+DROP TABLE IF EXISTS sessions;
+CREATE TABLE sessions (
+    id INTEGER PRIMARY KEY,
+    users_id TINYTEXT,
+    created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(users_id) REFERENCES users(id)
+);
 
 INSERT INTO users VALUES
-    ("root", "DJ Testio", "/prophat.jpg", "When one has a great deal to put into it, a day has a hundred pockets.\n\t- Nietzsche", 1);
+    ("root", "DJ Testio", "/prophat.jpg", "When one has a great deal to put into it, a day has a hundred pockets.\n\t- Nietzsche", "6eb228fb5b59ab49a45a48bdd9e5f0ed65b43afb52ec72cc825a567986630827");
 
 INSERT INTO roles VALUES
-    ('root', 'admin')
-    ('root', 'moderator')
-    ('root', 'poster')
-    ('root', 'reader')
+    ('root', 'admin'),
+    ('root', 'moderator'),
+    ('root', 'poster'),
+    ('root', 'reader');
 
 INSERT INTO posts VALUES
     (0, "root", 0, "ROOT POST TEST");

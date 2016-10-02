@@ -96,7 +96,6 @@ import hashlib
 import random
 import base64
 from itertools import starmap
-from collections import Counter
 
 parser = argparse.ArgumentParser("Shark Backend. Bites users occasionally")
 
@@ -162,6 +161,16 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             key : val[0] if len(val) == 1 else val
             for key, val in urllib.parse.parse_qs(res.query).items()
         }
+        print("Reading")
+        if 'content-length' in self.headers and int(self.headers['content-length']) > 0:
+            input_data = self.rfile.read(int(self.headers['content-length'])).decode('utf-8')
+            print("Read", input_data)
+            iparams = json.loads(input_data)
+            # Bail out if we have the same parameter from 2 sources
+            intersection = set(iparams.keys()) & set(params.keys())
+            if intersection:
+                self.error(400, BadParamsError("Parameters %s defined twice" % intersection))
+            params.update(iparams)
         path = [pe for pe in res.path.split("/") if pe][self.server.skip:];
         if not path:
             self.respond(self.server.ns, 404)
@@ -229,7 +238,8 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
                 query = qmap['query']
                 porder = qmap['params']
                 role = qmap['role']
-
+                # do this after we've found the query cause we don't want to pattern match based on magic params
+                params.update({"?users_id": users_id})
                 if role not in roles:
                     self.error(401, AuthenticationError("You cannot get ye flask"))
                     return
@@ -237,8 +247,11 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
                     dc.execute(query, [params[k] for k in porder])
                 else:
                     dc.execute(query)
-                names = [name for name, _, _, _, _, _, _ in dc.description]
-                res = [dict(zip(names, vals)) for vals in dc.fetchall()]
+                if dc.description:
+                    names = [name for name, _, _, _, _, _, _ in dc.description]
+                    res = [dict(zip(names, vals)) for vals in dc.fetchall()]
+                else:
+                    res = None
                 self.respond(res)
             except sqlite3.OperationalError as e:
                 self.error(500, e)
@@ -265,7 +278,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
 
 class Server(http.server.HTTPServer):
     def __init__(self, port, ns, db, initsql, skip, domain, session_length):
-        self.dbconn = sqlite3.connect(db)
+        self.dbconn = sqlite3.connect(db, isolation_level=None)
         self.domain = domain
         self.session_length = session_length
         dc = self.dbconn.cursor()
@@ -273,7 +286,6 @@ class Server(http.server.HTTPServer):
         self.ns = json.load(ns)
         self.skip = skip
         if initsql:
-            dc = self.dbconn.cursor()
             dc.executescript(initsql.read())
             dc.close()
         super().__init__(('', port), RequestHandler)
@@ -299,6 +311,7 @@ class Server(http.server.HTTPServer):
                 except sqlite3.IntegrityError: # cances of this happening are absurdly small
                     sessid = self.sr.getrandbits(64)
             return sessid
+
     def get_query(self, path, params):
         """
         Return the query asked for by path that matches the given param names
@@ -313,9 +326,9 @@ class Server(http.server.HTTPServer):
                 cur = cur['children'][pe]
         except KeyError as e:
             raise NotFoundError("Couldn't find %s in JSON namespace: %s: cur: %r" % (str(path), str(e), cur));
-        params_present_counter = Counter(params.keys());
-        def try_query (qmap):
-            if Counter(qmap['params']) != params_present_counter:
+        params_present = set(params.keys());
+        def try_query(qmap):
+            if {pname for pname in qmap['params'] if not pname.startswith('?')} != params_present:
                 raise BadParamsError("Parameters %r do not match query params: %r" % (params, qmap))
             if 'params' in qmap and qmap['params']:
                 return qmap

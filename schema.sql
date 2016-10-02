@@ -18,11 +18,17 @@ CREATE TABLE roles (
 DROP TABLE IF EXISTS posts;
 CREATE TABLE posts (
     id INTEGER PRIMARY KEY ASC,
-    users_id TINYTEXT,
-    thread_id INTEGER,
+    owner TINYTEXT,
+    thread_id INTEGER NOT NULL,
+    created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    lasted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    parent_id INTEGER DEFAULT NULL,
+    subject TEXT DEFAULT NULL,
+    signature TEXT,
     content TEXT,
-    FOREIGN KEY(users_id) REFERENCES users(id),
-    FOREIGN KEY(thread_id) REFERENCES posts(id)
+    FOREIGN KEY(owner) REFERENCES users(id),
+    FOREIGN KEY(thread_id) REFERENCES posts(id),
+    FOREIGN KEY(parent_id) REFERENCES posts(id)
 );
 
 DROP TABLE IF EXISTS sessions;
@@ -42,5 +48,5 @@ INSERT INTO roles VALUES
     ('root', 'poster'),
     ('root', 'reader');
 
-INSERT INTO posts VALUES
+INSERT INTO posts (id, owner, thread_id, content) VALUES
     (0, "root", 0, "ROOT POST TEST");

@@ -4,10 +4,28 @@
         "params": ["id"],
         "role": "reader"
     }, {
-        "query": "SELECT * FROM posts WHERE threadid=?",
-        "params": ["thread_id"],
+        "query": "SELECT * FROM posts WHERE id=? UNION SELECT * FROM posts WHERE thread_id=? ORDER BY created",
+        "params": ["thread_id", "thread_id"],
         "role": "reader"
     }],
+    "post": [{
+        "query": "INSERT INTO posts (owner, thread_id, parent_id, subject, signature, content) VALUES (?, ?, ?, ?, ?, ?)",
+        "params": ["owner", "thread_id", "parent_id", "subject", "signature", "content"],
+        "role": "poster"
+    }, {
+        "query": "INSERT INTO posts (owner, thread_id, subject, signature, content) VALUES (?, ?, ?, ?, ?)",
+        "params": ["owner", "thread_id", "subject", "signature", "content"],
+        "role": "poster"
+    }, {
+        "query": "UPDATE posts SET owner=?, thread_id=?, subject=?, signature=?, content=? WHERE id=? AND owner=?",
+        "params": ["owner", "thread_id", "subject", "signature", "content", "id", "?users_id"],
+        "role": "poster"
+    }],
+    "unpost": {
+        "query": "DELETE FROM posts WHERE id=? AND owner=?",
+        "params": ["id", "?users_id"],
+        "role": "poster"
+    },
     "users": {
         "query": "SELECT id, nick, title, avatar, signature from users WHERE id = ?",
         "params": ["id"],

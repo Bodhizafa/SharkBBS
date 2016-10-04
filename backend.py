@@ -37,7 +37,8 @@ would execute
     ns['children']['posts'] % {thread_id: 341}
 which parameter key is which ? is defined by the order of the 'params' field.
 
-and return the results as a list of colname:val JSON maps.
+["?users_id"] may be used in the params field to substitute the logged in user,
+or NULL if there is none.
 
 ==Namespace definition/navigation
 
@@ -84,6 +85,22 @@ A node with children:
 }
 
 Pattern matched list nodes cannot have children.
+
+== Response format
+One of 3 things will be returned depending on what the request query is and what happened:
+If it is a SELECT statement (or other statement that returns rows), the rows
+will be returned as a JSON list (which may be empty) of {"colname": value ...} dicts
+
+If it is an INSERT or DELETE statement or somesuch, a plain integer
+representing the number of rows modified.  (if 0 or -1, something probably went wrong)
+
+If it for some reason errors, an object of the form:
+{
+"error": "python type name of exception that occured",
+"value": "printed exception message"
+}
+
+In theory there could be more keys, but as of the writing of this comment, there never are.
 """
 
 import http.server
@@ -198,7 +215,33 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
                 for user, role in rows:
                     roles.add(role)
                 print("Session id %s recognized :D, user %s has roles %r" % (sessions_id, users_id, roles))
-        if path[0] == '_sessions':
+        if path[0] == '_register':
+            if reqtype != 'POST':
+                self.error(400, BadParamsError('You can only POST to _register'))
+                return
+            fields = {"id", "nick", "avatar", "signature", "password", "passcode"}
+            print(params)
+            for f in fields:
+                if f not in params:
+                    self.error(400, BadParamsError("Missing field: " + f))
+                    return
+            if params['passcode'] != "frank has pretty testicles":
+                self.error(401, BadParamsError("Wrong secret passcode"))
+                return
+
+            password_sha256 = self.server.hash_password(params['password'])
+            dc.execute("INSERT INTO users (id, nick, avatar, signature, password_sha256) VALUES (?, ?, ?, ?, ?)",
+                       (params["id"], params["nick"], params["avatar"], params["signature"], password_sha256))
+            # XXX do this better (why the hell is default_roles way down here? Should be config or some shit
+            default_roles = ['poster', 'reader']
+            dc.executemany("INSERT INTO roles (users_id, role) VALUES (?, ?)",
+                           [(params["id"], role) for role in default_roles])
+            sessid = self.server.get_session(params["id"], params['password'])
+            self.respond({"users_id": params['id'], "roles": default_roles}, cookie={"sessions_id": sessid})
+            print("Registered user: ", params['id'])
+            return
+
+        elif path[0] == '_sessions':
             if reqtype == 'GET':
                 auth = self.headers['Authorization']
                 # If we don't auth or do it wrong and we're not logged in
@@ -251,7 +294,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
                     names = [name for name, _, _, _, _, _, _ in dc.description]
                     res = [dict(zip(names, vals)) for vals in dc.fetchall()]
                 else:
-                    res = None
+                    res = dc.rowcount
                 self.respond(res)
             except sqlite3.OperationalError as e:
                 self.error(500, e)

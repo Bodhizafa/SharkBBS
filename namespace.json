@@ -26,9 +26,17 @@
         "params": ["id", "?users_id"],
         "role": "poster"
     },
-    "users": {
+    "users": [{
         "query": "SELECT id, nick, title, avatar, signature from users WHERE id = ?",
         "params": ["id"],
         "role": "reader"
-    }
+    }, {
+        "query": "UPDATE users SET nick=?, avatar=?, signature=?, password_sha256=? WHERE id=?",
+        "params": ["nick", "avatar", "signature", "password_sha256", "?users_id"],
+        "role": "reader"
+    }, {
+        "query": "UPDATE users SET nick=?, avatar=?, signature=? WHERE id=?",
+        "params": ["nick", "avatar", "signature", "?users_id"],
+        "role": "reader"
+    }]
 }}

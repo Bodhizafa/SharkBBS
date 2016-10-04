@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <script charset="utf-8" type="application/javascript" src="d3.js"></script>
+<script charset="utf-8" type="application/javascript" src="https://bitwiseshiftleft.github.io/sjcl/sjcl.js"></script>
 <style type="text/css">
 /* (C) 2015-2016 Landon Meernik, all rights reserved */
 /*
@@ -232,9 +233,16 @@ img.avatar {
 .formatted a {
     color: orange;
 }
+.formatted h1 {
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+}
+.formatted h2 {
+    margin-top: 0.2em;
+    margin-bottom: 0.2em;
+}
 .formatted img {
-    max-width: 500pt;
-    max-height: 500pt;
+    max-width: 100%;
 }
 .unformatted {
     white-space: pre;
@@ -247,7 +255,7 @@ textarea.help {
     height: 30em;
 }
 </style>
-<title>...</title>
+<title>STAY OUT!</title>
 <script>
 "use strict";
 // Model - Literally a picture of how data is literally shaped on the backend
@@ -275,6 +283,7 @@ Reply2Int1 (OP)
 |-...
 <<<^ go up one level by loading OP's thread_id
 */
+// call primeUsers() to ensure that a given set of user data is in here
 var users = { // User data. Users missing these fields may not render correctly. There may be more, because #schemaless
     "": { // Defaults
         "nick": "",
@@ -287,6 +296,41 @@ var users = { // User data. Users missing these fields may not render correctly.
 // DataModel - Metaphorically a picture of how data is literally shaped on the frontend.
 document.addEventListener("DOMContentLoaded", function() {
     var user = "", // Current logged in username
+        // This mutates fields
+        registerUser = function(users_id, fields, callback) {
+            console.debug("Registering user", user, "to", fields);
+            d3.xhr('/data/_register?id=' + encodeURIComponent(users_id))
+            .on('load', function(resp) {
+                var d = JSON.parse(resp.response);
+                user = d['users_id']
+                primeUsers([user], callback)
+                console.debug('Registered user: ', users_id);
+            })
+            .on('error', function(resp) {
+                alert('SHIT POST ' + resp.status);
+                console.error('Something bad happened', resp);
+            })
+            .header('Content-Type', 'application/json')
+            .send('POST', JSON.stringify(fields));
+        },
+        updateUser = function(users_id, fields, callback) {
+            console.debug("Updating user", user, "to", fields);
+            if (fields["password"] !== undefined) {
+                fields["password_sha256"] = sjcl.codec.hex.fromBits(sjcl.hash.sha256.hash(fields["password"]));
+                delete fields["password"];
+            }
+            d3.xhr('/data/users')
+            .on('load', function(resp) {
+                console.log("Successfully updated ", users_id);
+                callback();
+            })
+            .on('error', function(resp) {
+                console.error("User update failed", resp);
+                alert("SHIT POST");
+            })
+            .header('Content-Type', 'application/json')
+            .send('POST', JSON.stringify(fields));
+        },
         primeUsers = (function(usernames, cb) {
         // `usernames` should be an array of usernames, cb will be invoked when they are all in `users`
             var uncached_by_username = {},
@@ -357,7 +401,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         usernames;
                     // First sift through all posts returned and put them in either replies or interjections
                     rows.forEach(function(post) {
-                        if (post.parent_id) {
+                        if (post.parent_id !== null) {
                             if (!interjections_by_parent_id[post.parent_id]) {
                                 interjections_by_parent_id[post.parent_id] = [];
                             }
@@ -436,7 +480,7 @@ document.addEventListener("DOMContentLoaded", function() {
         // return a 'div' DOM element representing "source" rendered according to the semantics of this function.
         format = function(source) {
             // tokens which can have formatting semantics. They'll show up in the token stream as strings
-            var formatting_tokens = ['__', '~~', '**', '//', '>', '*', '\n', '[', ']', '|'],
+            var formatting_tokens = ['__', '~~', '**', '//', '=', '>', '*', '\n', '[', ']', '|'],
                 parse = (function() {
                     var flatten = function flatten(elemss) {
                             var elems = [];
@@ -583,7 +627,9 @@ document.addEventListener("DOMContentLoaded", function() {
                         },
                         grammar = {
                             'doc'       : adjacent(run('block', collect('div', {'class': 'formatted'})), tok(undefined), flatten),
-                            'block'     : or('list', 'quote', 'text'),
+                            'block'     : or('bigtext', 'list', 'quote', 'text'),
+                            'bigtext'   : or(adjacent(tok('='), tok('='), run('span', flatten), tok('\n'), wrap('h2', 2)),
+                                             adjacent(tok('='), run('span', flatten), tok('\n'), wrap('h1', 1))),
                             'text'      : run('line', collect('div')),
                             'line'      : adjacent(or(adjacent('span_noblock', run('span', flatten), flatten), 'span_noblock', 'garbage'), run(tok_lit('\n'), flatten),
                                 function (elemss) {
@@ -599,7 +645,7 @@ document.addEventListener("DOMContentLoaded", function() {
                             'span'      : or('content', run('blockfmt', flatten),
                                              'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext',
                                              'link', 'image'),
-                            'blockfmt'  : or(tok_lit("*"), tok_lit(">")),
+                            'blockfmt'  : or(tok_lit('='), tok_lit("*"), tok_lit(">")),
                             'underlinetext' : adjacent(tok('__'), run('span', flatten), tok('__'), wrap('u', 1)),
                             'strikethroughtext' : adjacent(tok('~~'), run('span', flatten), tok('~~'), wrap('del', 1)),
                             'boldtext'  : adjacent(tok('**'), run('span', flatten), tok('**'), wrap('b', 1)),
@@ -942,48 +988,17 @@ document.addEventListener("DOMContentLoaded", function() {
                         alert('Username is not a word');
                         return;
                     }
-                    d3.xhr(urls.users + '/' + encodeURIComponent('org.couchdb.user:' + username))
-                    .on('load', function(resp) {
-                        if (resp.status != 201) {
-                            alert('SHIT POST ', + resp.status);
-                            console.error('Non-201 response', resp);
-                        }
-                        console.debug('Registered user: ', resp);
-                        d3.xhr('/data/_sessions', function(response) {
-                            if (response === null) {
-                                console.error('Unsuccessful login');
-                                alert('Unauthorized!');
-                                return;
-                            }
-                            alert('Registered ' + username + '. :D');
-                            user = username;
-                            window.location.hash = 'posts/0';
-                        })
-                        .on('error', function(response) {
-                            console.error("Couldn't log in after creating user", username, response);
-                            alert('SHIT POST!')
-                        })
-                        .header('Content-Type', 'application/json')
-                        .send('POST', JSON.stringify({
-                            'name': username,
-                            'password': password}));
-                    })
-                    .on('error', function(resp) {
-                        alert('SHIT POST ' + resp.status);
-                        console.error('Something bad happened', resp);
-                    })
-                    .header('Content-Type', 'application/json')
-                    .send('PUT', JSON.stringify({
-                        '_id': 'org.couchdb.user:' + username,
-                        'name': username,
-                        'type': 'user',
-                        'roles': [],
+                    registerUser(username, {
                         'password': password,
                         'nick': nick,
                         'signature': signature,
                         'avatar': avatar,
                         'passcode': passcode,
-                    }));
+                    }, function() {
+                        alert('Registered ' + username + '. :D');
+                        user = username;
+                        window.location.hash = 'posts/0';
+                    });
                 });
             },
             'posts': function(post) {
@@ -1029,56 +1044,24 @@ document.addEventListener("DOMContentLoaded", function() {
                     .style('display', user == username ? 'inline' : 'none')
                     .on('click', function() {
                         var fields = {
-                                'type': 'user',
                                 'nick': $profile_page.select('input.nick').property('value'),
                                 'avatar': $profile_page.select('input.avatar').property('value'),
                                 'signature': $profile_page.select('textarea.signature').property('value'),
-                                'password': $profile_page.select('input.password2').property('value')
-                            },
-                            inherited_fields = ['_rev', '_id', 'roles', 'name'],
-                            password_fields = ['derived_key', 'salt', 'iterations', 'password_scheme'],
-                            invalidate_session = true;
+                                'password': $profile_page.select('input.password').property('value')
+                            };
 
-                        if (fields.password != $profile_page.select('input.password').property('value')) {
+                        if (fields.password != $profile_page.select('input.password2').property('value')) {
                             alert("Passwords don't match.");
-                            return
+                            return;
                         }
                         if (!fields.password) { // If there's no password change, pass through the old password fields
                             delete fields.password;
-                            inherited_fields = inherited_fields.concat(password_fields);
-                            invalidate_session = false;
                         }
-                        inherited_fields.forEach(function(key) {
-                            fields[key] = users[user][key];
+                        updateUser(user, fields, function() {
+                            delete users[username]; // Users cache will be reprimed when we load the profile
+                            alert("Updated!");
+                            window.location.hash = "profile";
                         });
-                        console.debug("Updating user", user, "to", fields);
-                        d3.xhr(urls.users + '/' + encodeURIComponent('org.couchdb.user:' + user))
-                        .on('load', function(resp) {
-                            delete users[username];
-                            if (invalidate_session) {
-                                d3.xhr('/data/_sessions')
-                                .on('load', function(resp) {
-                                    if (!user) {
-                                        alert("SHIT POST")
-                                        throw "Seriously how did you get here?";
-                                    }
-                                    delete users[user];
-                                    user = "";
-                                    alert("Password changed, please relogin");
-                                    window.location.hash = "login";
-                                })
-                                .send("DELETE");
-                            } else {
-                                alert("Updated!");
-                                window.location.hash = "profile";
-                            }
-                        })
-                        .on('error', function(resp) {
-                            console.error("User update failed", resp);
-                            alert("SHIT POST");
-                        })
-                        .header('Content-Type', 'application/json')
-                        .send('PUT', JSON.stringify(fields));
                     });
                     console.debug("Rendered profile for", username);
                 });
@@ -1093,6 +1076,7 @@ document.addEventListener("DOMContentLoaded", function() {
                             return format($help_page.select('textarea.help').property('value'))
                         });
                 })
+                .on('click')()
             }
         },
         route = function(hash) {
@@ -1113,7 +1097,11 @@ document.addEventListener("DOMContentLoaded", function() {
             }
         };
     window.addEventListener('hashchange', function() {route(window.location.hash)});
-    route(window.location.hash);
+    if(!window.location.hash) {
+        window.location.hash = "help";
+    } else {
+        route(window.location.hash);
+    }
 });
 </script>
 </head>
@@ -1140,6 +1128,7 @@ document.addEventListener("DOMContentLoaded", function() {
     <p><span>Password:</span><input type="password" class="password" /></p>
     <p><span>Password:</span><input type="password" class="password2" /></p>
     <p><span>Magic Passcode:</span><input type="text" class="passcode" /></p>
+    <p>The general security of this site is poor. Do not use a password you use anywhere else or do serious business here.</p>
     <button class="register">register</button>
 </div>
 <div id="posts_page" class="page">
@@ -1232,7 +1221,19 @@ document.addEventListener("DOMContentLoaded", function() {
     <div class="help"></div>
     <br /> <hr />
     <textarea class="help">
-Press "render" below to see what the contents of this box would look like as a post
+=WELCOME, HUMAN!
+Scroll through this gratuitously large header image to access the website.
+[gamechangerbro.jpg|]
+Alright, feel like you're on a hip website made by attractive millenials with more capital than competence? Good, cause you are.
+==__About this website__
+mindshark.camp is a ~~cheap ass~~ Cali Fran Frisco YCombadrona-Shenzhen-holdings ventures backed ~~website~~ app inspired by ~~an early 80s BBS~~ the hippest social networking trends, reimagined and presented through an interface based on ~~an early 90s star trek series~~ the latest MarTech certified user-oriented demand-driven supply-side access pattern paradigms, built on a solid foundation of ~~early '00s web standards~~ bleeding edge fault-tolerant cloud enterprise content delivery famework distribution network platforms, spiced up with a little bit of of ~~an early '10s visualization library~~ some shit we got from the future, seriously don't worry about it, it's literally magic, we ain't gotta explain shit! Mind blown yet? Yeah, we thought so. Once your mind is unmushed, feel free to move on to actually using the site, or, y'know, don't (it's your loss... you're not a loser, are you?)
+==__Getting Started__
+Okay cool, you made it. Click "register" on top of this page to create a new user, fill out the forms and DO NOT REUSE A PASSWORD (this site has only marginally better opsec than your grandma with the open wifi who still has BonziBUDDY). You'll need to know the secret passcode to do so. If you don't have it, you're probably not cool enough to hang out here, maybe try [https://slack.com].
+If you fuck it up don't worry, all that shit can be changed from profile later. Once you're a user, ~~grab a fresh needle and~~ you will be logged in and escorted to the lobby. From there you may proceed to...
+==__Using this website__
+As a user, you may reply to posts, interject upon posts, or discover bugs. If ypu reply to a post, your reply will be addded to the end of the current thread in it's full glory. If you interject, your interjection will be added immediely after said post, but only the subject will be shown, so it had better be good. If you load an interjection, it is displayed in full as the beginning of a new thread, which anyone may reply to, or interject upon replies to. If you discover a bug, the page will say "SHIT POST!" or something like that. Tell Landon what you were doing, and he might fix it (application of gin-based beverages and blowjobs have been known to speed up the process, but results are not guaranteed). That's it, other than one final rule: A post must not be boring, if you feel your post is too boring, you might want to spice it up with some...
+==__Formatting__
+This page is rendered the same as a post. Check out the text box at the bottom of the page to see how it's made and click "render" to regenerate it and see the results.
 __this is some underlinetext__
 **this is some boldtext**
 ~~this is some strikethroughtext~~
@@ -1251,13 +1252,6 @@ And a picture of a hat: [./prophat.jpg|]
 </body>
 <script>
 "use strict";
-var urls = {
-    "posts": "/posts",
-    "thread": "/posts/_design/posts/_view/thread",
-    "post": "/posts/_design/posts/_update/post",
-    "session": "/_sessions",
-    "users": "/_users"
-}
 if (Element.prototype.closest === undefined) {
     console.log("Registering closest");
     Element.prototype.closest = function(sel) {

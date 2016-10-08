@@ -137,6 +137,40 @@ img.avatar {
     border-bottom: 1pt solid #000;
     margin: -11pt 6pt -1pt 0;
 }
+/* Bullshit for miniprofiles in posts */
+.post .miniprofile {
+    margin: -1pt 3pt -1pt -1pt;
+    float: left;
+}
+
+.post .footer button {
+    margin: 0 -1pt -1pt 0;
+}
+
+/* Bullshit for the OP */
+.post.op div, .post.op {
+    border-color: orange
+}
+.post.op .subject{
+    color: orange
+}
+/* Bullshit for interjection stubs */
+.post.interjection {
+    margin-left:48pt;
+}
+/* Bullshit for the post editor */
+.post textarea.content {
+    width: calc(100% - 12pt);
+    max-width: calc(100% - 12pt);
+    border: 1pt solid orange;
+    height: 15em;
+}
+.post input.subject {
+    width: 25ex;
+    display: block;
+    font-weight: normal;
+    font-size: 12pt;
+}
 /* Bullshit to make the right buttons/things displayed.
 There used to be a spaghetti nightmare of setting 'display' to a function with D3. Now there is this.
 
@@ -163,36 +197,41 @@ Note that this is only to make users not click buttons, not some sort of securit
 measure to make bogus requests impossible. Bogus requests are always possible,
 and dealing with them is the backend's problem.
 */
-.post .footer button {
-    margin: 0 -1pt -1pt 0;
-    display: none;
-}
-
-/* Bullshit for miniprofiles in posts */
-.post .miniprofile {
-    margin: -1pt 3pt -1pt -1pt;
-    float: left;
-}
-/* Bullshit for normal posts (replies) */
-.post.reply .interject {
+.page.active {
     display: initial;
 }
-/* Bullshit for the OP */
-.post.op div, .post.op {
-    border-color: orange
+.page {
+    display: none;
 }
-.post.op .subject{
-    color: orange
+/* Bullshit for the login page */
+.loggedin button.login {
+    display: none;
+}
+.loggedin button.logout{
+    display: initial;
+}
+button.logout {
+    display: none;
+}
+p.loggedon {
+    display: none;
+}
+.loggedin p.loggedon {
+    display: initial;
+}
+/* Bullshit for the register page */
+.loggedin #register_tab {
+    display: none;
+}
+/*
+.post.reply .interject {
+    display: initial;
 }
 .post.op .unload {
     display: initial;
 }
 .post.op .interject {
     display: initial;
-}
-/* Bullshit for interjection stubs */
-.post.interjection {
-    margin-left:48pt;
 }
 .post.interjection .content {
     display: none;
@@ -215,19 +254,6 @@ and dealing with them is the backend's problem.
 .post.interjection.posted .signature {
     display: block;
 }
-/* Bullshit for the post editor */
-.post textarea.content {
-    width: calc(100% - 12pt);
-    max-width: calc(100% - 12pt);
-    border: 1pt solid orange;
-    height: 15em;
-}
-.post input.subject {
-    width: 25ex;
-    display: block;
-    font-weight: normal;
-    font-size: 12pt;
-}
 .post.posted .save {
     display: initial;
 }
@@ -243,14 +269,14 @@ and dealing with them is the backend's problem.
 .post.replyed .reply {
     display: initial;
 }
-/* Bullshit for my posts */
-
 .post.mine .edit {
     display: initial;
 }
 .post.mine .delete {
     display: initial;
 }
+*/
+
 /* Bullshit for the formatter */
 .formatted .quote {
     white-space: pre;
@@ -361,7 +387,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 return;
             }
             if (users_id !== null) { // check for an existing session.
-                xhr.header('Authorization', "Basic " + btoa(username + ":" + password));
+                xhr.header('Authorization', "Basic " + btoa(users_id + ":" + password));
             }
             xhr.send('GET');
         },
@@ -1016,7 +1042,9 @@ document.addEventListener("DOMContentLoaded", function() {
                     login(username, password, function() {
                         if(!user) {
                             alert("WRONG!");
+                            return;
                         };
+                        $login_page.select('.user').text(user);
                     });
                 });
             },
@@ -1072,7 +1100,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 }
                 console.debug('Loading profile for: ', username);
                 primeUsers([username], function() {
-                    $profile_page.classed('
+                    $profile_page.classed('mine', user == username);
                     // Damnit, HTML, why is there no consistent "the thing I'm displaying" property/attr/css
                     $profile_page.select('input.username').property('value', username);
                     $profile_page.select('span.username').text(username);

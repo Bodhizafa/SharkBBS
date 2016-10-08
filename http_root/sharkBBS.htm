@@ -5,7 +5,6 @@
 <script charset="utf-8" type="application/javascript" src="d3.js"></script>
 <script charset="utf-8" type="application/javascript" src="https://bitwiseshiftleft.github.io/sjcl/sjcl.js"></script>
 <style type="text/css">
-/* (C) 2015-2016 Landon Meernik, all rights reserved */
 /*
 This is made up of
     cyan borders and text,
@@ -138,10 +137,37 @@ img.avatar {
     border-bottom: 1pt solid #000;
     margin: -11pt 6pt -1pt 0;
 }
+/* Bullshit to make the right buttons/things displayed.
+There used to be a spaghetti nightmare of setting 'display' to a function with D3. Now there is this.
+
+the body, some pages (the things as 'this' in route functions), and and posts (class .post) will have classes applied depending on mode.
+Multiple classes can be applied at the same time (for example .posted.interjection - editing an interjection)
+body modes are:
+    .loading - set when there is nothing to display because we're waiting on a request
+    .loggedin - set when a user is logged in
+    .moderator  - set when the logged in user is a moderator
+    .editing - set when the user is editing a post or interjecting on a post
+post modes are:
+    .posted - the post is currently being edited
+    .replyed - the post is the reply editor at the bottom
+    .mine - this post is owned by the logged in user
+    .interjection - this post is an interjection
+    .hascontent - this post has contents
+page modes are:
+    .mine - this is my profile, so the editor should be displayed (only applied to profile)
+    .active - this is the page currently routed through
+
+Each button has a class named after what it says/does.
+
+Note that this is only to make users not click buttons, not some sort of security
+measure to make bogus requests impossible. Bogus requests are always possible,
+and dealing with them is the backend's problem.
+*/
 .post .footer button {
     margin: 0 -1pt -1pt 0;
     display: none;
 }
+
 /* Bullshit for miniprofiles in posts */
 .post .miniprofile {
     margin: -1pt 3pt -1pt -1pt;
@@ -252,7 +278,7 @@ img.avatar {
 textarea.help {
     max-width: 120ex;
     width: 100%;
-    height: 30em;
+    height: 40em;
 }
 </style>
 <title>STAY OUT!</title>
@@ -296,6 +322,49 @@ var users = { // User data. Users missing these fields may not render correctly.
 // DataModel - Metaphorically a picture of how data is literally shaped on the frontend.
 document.addEventListener("DOMContentLoaded", function() {
     var user = "", // Current logged in username
+        logout = function(callback) {
+            d3.xhr('/data/_sessions', function(response) {
+                delete users[user];
+                user = "";
+                d3.select('body').classed('loggedin', false); // XXX layering violation
+                // CSSTHIS $login_page.select('.loggedon').style('display', 'none');
+                callback();
+            })
+            .send('DELETE');
+        },
+        // users_id and password may be null
+        login = function(users_id, password, callback) {
+        var xhr = d3.xhr('/data/_sessions')
+            .on('load', function(resp) {
+                var response = JSON.parse(resp.response);
+                console.log("login response: ", response);
+                if (response === null) {
+                    console.error('Unsuccessful login');
+                    alert('Unauthorized!');
+                    return;
+                }
+                user = response.users_id;
+                primeUsers([user], function() {
+                    d3.select('body').classed('loggedin', true);
+                    callback();
+                });
+            })
+            .on('error', function(resp) {
+                console.log("Login error: ", resp.response);
+                // alert("SHIT POST");
+                d3.select('body').classed('loggedin', false); // XXX layering violation
+                // CSSTHIS $login_page.select('.loggedon').style('display', 'none');
+                callback();
+            });
+            if (user) {
+                callback();
+                return;
+            }
+            if (users_id !== null) { // check for an existing session.
+                xhr.header('Authorization', "Basic " + btoa(username + ":" + password));
+            }
+            xhr.send('GET');
+        },
         // This mutates fields
         registerUser = function(users_id, fields, callback) {
             console.debug("Registering user", user, "to", fields);
@@ -780,9 +849,10 @@ document.addEventListener("DOMContentLoaded", function() {
                     return d.owner == user;
                 });
                 $post.select('.content')
-                    .style('display', function(d) {
-                        return d.content ? null : "none";
+                    .classed('hascontent', function(d) {
+                        return !!d.content;
                     })
+                    //CSSTHIS .style('display', function(d) { return d.content ? null : "none"; })
                     .html("")
                     .append(function(d) {
                         return format(d.content);
@@ -853,7 +923,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     var $nposted = d3.select(document.createElement("div")),
                         that = this,
                         thread = d3.select('#base_posted .thread_id').attr('value')
-                        d3.selectAll('#posts .interject').style('display', 'none');
+                        // CSSTHIS (D we even care?) d3.selectAll('#posts .interject').style('display', 'none');
                         $nposted.html(d3.select('#template').html())
                             .attr('class', "post interjection posted")
                             .attr('id', "")
@@ -872,7 +942,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         $nposted.select('.title').text(users[user].title);
                         $nposted.select('.nick').text(users[user].nick);
                         $nposted.select('.interject')
-                            .style('display', 'initial')
+                            // CSSTHIS .style('display', 'initial')
                             .on('click', function() {
                             var post = getPost(this.closest('.post'));
                                 post.parent_id = that.closest('.post').querySelector('.id').value;
@@ -883,9 +953,9 @@ document.addEventListener("DOMContentLoaded", function() {
                             });
                         $nposted.datum({});
                         $nposted.select('.cancel')
-                            .style('display', 'initial')
+                            //CSSTHIS .style('display', 'initial')
                             .on('click', function() {
-                                d3.selectAll('#posts .post:not(.interjection) .interject').style('display', 'initial');
+                                //CSSTHIS d3.selectAll('#posts .post:not(.interjection) .interject').style('display', 'initial');
                                 $nposted.remove();
                             });
                         document.getElementById('posts')
@@ -897,10 +967,10 @@ document.addEventListener("DOMContentLoaded", function() {
             updatePost($npost);
             updatePost($posts);
             $posts.order();
-            d3.selectAll('#posts .post:not(.interjection) .interject').style('display', 'initial');
+            //CSSTHIS d3.selectAll('#posts .post:not(.interjection) .interject').style('display', 'initial');
             // Set up the reply editor
             d3.select("#base_posted")
-                .style('display', 'block')
+                //CSSTHIS .style('display', 'block')
             d3.select("#base_posted .owner")
                 .attr('value', user)
             d3.select('#base_posted .signature').text(users[user].signature);
@@ -926,49 +996,29 @@ document.addEventListener("DOMContentLoaded", function() {
         routes = {
             'login': function() {
                 var $login_page = d3.select(this);
+                if(user) {
+                    // CSSTHIS $login_page.select('.loggedon').style('display', 'block');
+                    $login_page.select('.user').text(user);
+                } else {
+                    // CSSTHIS $login_page.select('.loggedon').style('display', 'none');
+                    $login_page.select('.user').text("");
+                }
                 $login_page.select('button.logout').on('click', function() {
-                    d3.xhr('/data/_sessions', function(response) {
-                        delete users[user];
-                        user = "";
-                        $login_page.select('.loggedon').style('display', 'none');
-                        d3.selectAll('#posts div.post').remove()
-                    })
-                    .send('DELETE');
+                    logout(function() {
+                        d3.selectAll('#posts div.post').remove();
+                        $login_page.select('.user').text("");
+                    });
                 });
                 $login_page.select('button.login').on('click', function() {
                     var username = $login_page.select('.username').property('value'),
                         password = $login_page.select('.password').property('value');
                     console.log('Attempting login as', username, password);
-                    d3.xhr('/data/_sessions', function(response) {
-                        if (response === null) {
-                            console.error('Unsuccessful login');
-                            alert('Unauthorized!');
-                            return;
-                        }
-                        console.log('Successful login', response);
-                        user = username;
-                        primeUsers([user], function() {
-                            window.location.hash = 'posts/0';
-                        });
-                    })
-                    .header('Content-Type', 'application/json')
-                    .header('Authorization', "Basic " + btoa(username + ":" + password))
-                    .send('GET');
+                    login(username, password, function() {
+                        if(!user) {
+                            alert("WRONG!");
+                        };
+                    });
                 });
-
-                d3.xhr('/data/_sessions')
-                .on('load', function(resp) {
-                    console.log("Initial login response: ", resp);
-                    var doc = JSON.parse(resp.response)
-                    user = doc.users_id;
-                    $login_page.select('.loggedon').style('display', 'block');
-                    $login_page.select('.user').text(user);
-                })
-                .on('error', function(resp) {
-                    console.log("Initial login error: ", resp.response);
-                    $login_page.select('.loggedon').style('display', 'none');
-                })
-                .send('GET');
             },
             'register': function() {
                 var $register_page = d3.select(this);
@@ -1022,6 +1072,7 @@ document.addEventListener("DOMContentLoaded", function() {
                 }
                 console.debug('Loading profile for: ', username);
                 primeUsers([username], function() {
+                    $profile_page.classed('
                     // Damnit, HTML, why is there no consistent "the thing I'm displaying" property/attr/css
                     $profile_page.select('input.username').property('value', username);
                     $profile_page.select('span.username').text(username);
@@ -1034,14 +1085,14 @@ document.addEventListener("DOMContentLoaded", function() {
                     $profile_page.select('input.password').property('value', "");
                     $profile_page.select('input.password2').property('value', "");
 
-                    $profile_page.selectAll('tr.password').style('display', user == username ? '' : 'none');
-                    $profile_page.selectAll('input').style('display', user == username ? 'inline' : 'none');
-                    $profile_page.selectAll('textarea').style('display', user == username ? 'inline' : 'none');
-                    $profile_page.selectAll('span').style('display', user == username ? 'none' : 'inline');
-                    $profile_page.selectAll('div').style('display', user == username ? 'none' : 'inline');
+                    //CSSTHIS $profile_page.selectAll('tr.password').style('display', user == username ? '' : 'none');
+                    //CSSTHIS $profile_page.selectAll('input').style('display', user == username ? 'inline' : 'none');
+                    //CSSTHIS $profile_page.selectAll('textarea').style('display', user == username ? 'inline' : 'none');
+                    //CSSTHIS $profile_page.selectAll('span').style('display', user == username ? 'none' : 'inline');
+                    //CSSTHIS $profile_page.selectAll('div').style('display', user == username ? 'none' : 'inline');
 
                     $profile_page.select('button.save')
-                    .style('display', user == username ? 'inline' : 'none')
+                    //CSSTHIS .style('display', user == username ? 'inline' : 'none')
                     .on('click', function() {
                         var fields = {
                                 'nick': $profile_page.select('input.nick').property('value'),
@@ -1084,17 +1135,23 @@ document.addEventListener("DOMContentLoaded", function() {
                 page = path_elements.shift(),
                 page_elem = d3.select('#' + page + "_page")[0][0];
             console.debug("Navigating to", page, "(", path_elements, ")");
-            if (page) {
-                d3.selectAll('.page').
-                    style("display", function(d) { return this.id.startsWith(page) ? "block" : "none"; });
-                d3.selectAll('#topbar a').
-                    classed("active", function(d) { return this.href.slice(1).split("/")[0] == page; });
-                routes[page].apply(page_elem, path_elements);
-            } else { // Did you really want to navigate to nowhere?
-                console.log("hash", hash, "appears to go nowhere");
-                d3.selectAll('.page').style("display", "none");
-                d3.selectAll('#topbar a').classed("active", false);
-            }
+            d3.selectAll('body').classed("loading", true);
+            login(null, null, function() {
+                d3.selectAll('body').classed("loading", false);
+                d3.select('body').classed("loggedin", !!user);
+                if (page) {
+                    d3.selectAll('.page')
+                    .classed("active", function(d) { return this.id.startsWith(page); });
+                    d3.selectAll('#topbar a')
+                    .classed("active", function(d) { return this.href.slice(1).split("/")[0] == page; });
+                    routes[page].apply(page_elem, path_elements);
+                } else { // Did you really want to navigate to nowhere?
+                    console.log("hash", hash, "appears to go nowhere");
+                    d3.selectAll('.page').classed("active", false);
+                    //CSSTHIS d3.selectAll('.page').style("display", "none");
+                    d3.selectAll('#topbar a').classed("active", false);
+                }
+            })
         };
     window.addEventListener('hashchange', function() {route(window.location.hash)});
     if(!window.location.hash) {
@@ -1226,12 +1283,12 @@ Scroll through this gratuitously large header image to access the website.
 [gamechangerbro.jpg|]
 Alright, feel like you're on a hip website made by attractive millenials with more capital than competence? Good, cause you are.
 ==__About this website__
-mindshark.camp is a ~~cheap ass~~ Cali Fran Frisco YCombadrona-Shenzhen-holdings ventures backed ~~website~~ app inspired by ~~an early 80s BBS~~ the hippest social networking trends, reimagined and presented through an interface based on ~~an early 90s star trek series~~ the latest MarTech certified user-oriented demand-driven supply-side access pattern paradigms, built on a solid foundation of ~~early '00s web standards~~ bleeding edge fault-tolerant cloud enterprise content delivery famework distribution network platforms, spiced up with a little bit of of ~~an early '10s visualization library~~ some shit we got from the future, seriously don't worry about it, it's literally magic, we ain't gotta explain shit! Mind blown yet? Yeah, we thought so. Once your mind is unmushed, feel free to move on to actually using the site, or, y'know, don't (it's your loss... you're not a loser, are you?)
+mindshark.camp is a ~~cheap ass~~ Cali Fran Frisco YCombadrona-Shenzhen-holdings ventures backed ~~website~~ app inspired by ~~an early '80s BBS~~ the hippest social networking trends, reimagined and presented through an interface based on ~~an early '90s star trek series~~ the latest MarTech certified user-oriented demand-driven supply-side access pattern paradigms, built on a solid foundation of ~~early '00s web standards~~ bleeding edge fault-tolerant cloud enterprise content delivery famework distribution network platforms, spiced up with a little bit of of ~~an early '10s visualization library~~ some shit we got from the future, seriously don't worry about it, it's literally magic, we ain't gotta explain shit! Mind blown yet? Yeah, we thought so. Once your mind is unmushed, feel free to move on to actually using the site, or, y'know, don't (it's your loss... you're not a loser, are you?)
 ==__Getting Started__
-Okay cool, you made it. Click "register" on top of this page to create a new user, fill out the forms and DO NOT REUSE A PASSWORD (this site has only marginally better opsec than your grandma with the open wifi who still has BonziBUDDY). You'll need to know the secret passcode to do so. If you don't have it, you're probably not cool enough to hang out here, maybe try [https://slack.com].
-If you fuck it up don't worry, all that shit can be changed from profile later. Once you're a user, ~~grab a fresh needle and~~ you will be logged in and escorted to the lobby. From there you may proceed to...
+Okay cool, you made it. Click "register" on top of this page to become a new user, fill out the forms and DO NOT REUSE A PASSWORD (this site has only marginally better opsec than your grandma with the open wifi and BonziBUDDY). You'll need to know the secret passcode to do so. If you don't have it, you're probably not cool enough to hang out here, maybe try [https://slack.com].
+If you fuck it up don't worry, all that can be changed from profile later. Once you're a user, ~~grab a fresh needle and~~ you will be logged in and escorted to the lobby. From there you may proceed to...
 ==__Using this website__
-As a user, you may reply to posts, interject upon posts, or discover bugs. If ypu reply to a post, your reply will be addded to the end of the current thread in it's full glory. If you interject, your interjection will be added immediely after said post, but only the subject will be shown, so it had better be good. If you load an interjection, it is displayed in full as the beginning of a new thread, which anyone may reply to, or interject upon replies to. If you discover a bug, the page will say "SHIT POST!" or something like that. Tell Landon what you were doing, and he might fix it (application of gin-based beverages and blowjobs have been known to speed up the process, but results are not guaranteed). That's it, other than one final rule: A post must not be boring, if you feel your post is too boring, you might want to spice it up with some...
+As a user, you may reply to posts, interject upon posts, or discover bugs. If you reply to a post, your reply will be addded to the end of the current thread in it's full glory. If you interject, your interjection will be added immediely after said post, but only the subject will be shown, so it had better be good. If you load an interjection, it is displayed in full as the beginning of a new thread, which anyone may reply to, or interject upon replies to. If you discover a bug, the page will say "SHIT POST!" or something like that. Tell Landon what you were doing, and he might fix it (application of gin-based beverages and blowjobs have been known to speed up the process, but results are not guaranteed). That's it, other than one final rule: A post must not be boring, if you feel your post is too boring, you might want to spice it up with some...
 ==__Formatting__
 This page is rendered the same as a post. Check out the text box at the bottom of the page to see how it's made and click "render" to regenerate it and see the results.
 __this is some underlinetext__
@@ -1266,5 +1323,6 @@ if (Element.prototype.closest === undefined) {
         }
     }
 }
+/* (C) 2015-2016 Landon Meernik, all rights reserved */
 </script>
 </html>

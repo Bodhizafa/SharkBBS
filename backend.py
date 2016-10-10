@@ -225,7 +225,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
                 if f not in params:
                     self.error(400, BadParamsError("Missing field: " + f))
                     return
-            if params['passcode'] != "frank has pretty testicles":
+            if params['passcode'] != "you did this to me!":
                 self.error(401, BadParamsError("Wrong secret passcode"))
                 return
 

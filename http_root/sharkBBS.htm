@@ -2,8 +2,889 @@
 <html>
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <script charset="utf-8" type="application/javascript" src="d3.js"></script>
 <script charset="utf-8" type="application/javascript" src="https://bitwiseshiftleft.github.io/sjcl/sjcl.js"></script>
+<!--
+The look and feel is inspired by the computer interfaces in Star Trek TNG
+The architecture is based on a novel design pattern: Model, DataModel, Application (MDMA).
+The file itself is laid out in that order, search those keywords to find the beginning of each section.
+All the positioning is done with points (not pixels) because it's 201x and DPI-independence is important.
+
+Fuck, who am I kidding, nobody is ever going to read this.
+Their loss :)
+--!>
+<title>STAY OUT!</title>
+<script>
+"use strict";
+// Model - Literally a picture of how data is literally shaped on the backend
+// schema.sql and namespace.json are also part of this.
+/*
+thread_id is the id of the thread you would be replying to if you hit 'reply'.
+
+|-  means: thread_id points to ID of post in the column where | is.
+|-- means: '' and also this is an interjection on the |-'d post closest above it (its parent_id points there)
+
+"0" (default thread_id)
+-(Reply0)                       # Reply0 is the OP (post with _id = thread_id)
+|-Reply1
+|-Reply2                        # There is no Reply2Int0.
+|--Reply2Int1  (Reply0)         # Identified as interjections by having parent_id set
+   |-Reply2Int1 Reply1          # not displayed in this thread
+   |-...        Reply...
+|--Reply2Int2
+|-Reply3
+|-...
+^ current thread_id
+>>>^ go in one level by setting current thread_id to Reply2Int1
+
+Reply2Int1 (OP)
+|-Reply2Int1Reply1              # displayed in this thread
+|-...
+<<<^ go up one level by loading OP's thread_id
+*/
+
+// DataModel - Metaphorically a picture of how data is literally shaped on the frontend.
+// This is the part that takes care of making requests to the backend, and returning them in a format that the Application can
+// render without having to do any mogrification.
+
+// call primeUsers() to ensure that a given set of user data is in here
+var users = { // User data. Users missing these fields may not render correctly. There may be more, because #schemaless
+    "": { // Defaults
+        "nick": "",
+        "title": "",
+        "avatar": "",
+        "signature": ""
+    }
+}
+document.addEventListener("DOMContentLoaded", function() {
+    var user = "", // Current logged in username
+        logout = function(callback) {
+            d3.xhr('/data/_sessions', function(response) {
+                delete users[user];
+                user = "";
+                d3.select('body').classed('loggedin', false); // XXX layering violation
+                callback();
+            })
+            .send('DELETE');
+        },
+        // users_id and password may be null
+        login = function(users_id, password, callback) {
+        var xhr = d3.xhr('/data/_sessions')
+            .on('load', function(resp) {
+                var response = JSON.parse(resp.response);
+                console.log("login response: ", response);
+                if (response === null) {
+                    console.error('Unsuccessful login');
+                    alert('Unauthorized!');
+                    return;
+                }
+                user = response.users_id;
+                primeUsers([user], function() {
+                    d3.select('body').classed('loggedin', true);
+                    callback();
+                });
+            })
+            .on('error', function(resp) {
+                console.log("Login error: ", resp.response);
+                // alert("SHIT POST");
+                d3.select('body').classed('loggedin', false); // XXX layering violation
+                callback();
+            });
+            if (user) {
+                callback();
+                return;
+            }
+            if (users_id !== null) { // check for an existing session.
+                xhr.header('Authorization', "Basic " + btoa(users_id + ":" + password));
+            }
+            xhr.send('GET');
+        },
+        // This mutates fields
+        registerUser = function(users_id, fields, callback) {
+            console.debug("Registering user", user, "to", fields);
+            d3.xhr('/data/_register?id=' + encodeURIComponent(users_id))
+            .on('load', function(resp) {
+                var d = JSON.parse(resp.response);
+                user = d['users_id']
+                primeUsers([user], callback)
+                console.debug('Registered user: ', users_id);
+            })
+            .on('error', function(resp) {
+                alert('SHIT POST ' + resp.status);
+                console.error('Something bad happened', resp);
+            })
+            .header('Content-Type', 'application/json')
+            .send('POST', JSON.stringify(fields));
+        },
+        updateUser = function(users_id, fields, callback) {
+            console.debug("Updating user", user, "to", fields);
+            if (fields["password"] !== undefined) {
+                fields["password_sha256"] = sjcl.codec.hex.fromBits(sjcl.hash.sha256.hash(fields["password"]));
+                delete fields["password"];
+            }
+            d3.xhr('/data/users')
+            .on('load', function(resp) {
+                console.log("Successfully updated ", users_id);
+                callback();
+            })
+            .on('error', function(resp) {
+                console.error("User update failed", resp);
+                alert("SHIT POST");
+            })
+            .header('Content-Type', 'application/json')
+            .send('POST', JSON.stringify(fields));
+        },
+        primeUsers = (function(usernames, cb) {
+        // `usernames` should be an array of usernames, cb will be invoked when they are all in `users`
+            var uncached_by_username = {},
+                requests = 0,
+                log_cb = (function() {
+                    requests--;
+                    if (requests <= 0) {
+                        console.debug("Primed users cache for ", usernames, "as", user, "result: ", users);
+                        cb();
+                    }
+                });
+            console.log("Priming usrs cache, cookie:", document.cookie);
+            // Build a list of users we don't have in 'users,' then make a request if there actually are any
+            usernames.forEach(function(username) {
+                if (!users[username]) {
+                    uncached_by_username[username] = true;
+                }
+            });
+            if (Object.keys(uncached_by_username).length === 0) {
+                console.debug("Users cache hit all");
+                log_cb();
+                return;
+            }
+            // XXX make backend support getting multiple keys at once. As it is we just make a fuckton of requests.
+            Object.keys(uncached_by_username).forEach(function(username) {
+                requests += 1;
+                d3.xhr("/data/users/?id=" + encodeURIComponent(username), function(resp) {
+                    var rows = JSON.parse(resp.response);
+                    rows.forEach(function(row) {
+                        var username;
+                        if (row.error) {
+                            console.error("Error finding user ", username, ":", row);
+                            alert("SHIT POST")
+                        }
+                        username = row.id;
+                        users[username] = row;
+                    });
+                    log_cb();
+                })
+                .on("error", function(resp) {
+                    console.error("Error priming users cache for ", usernames, ":", resp);
+                    alert("SHIT POST!")
+                })
+                .header("Content-Type", "application/json")
+                .send("GET");
+            });
+        }),
+        loadThread = function(new_thread_id) {
+            console.debug("Loading thread ", new_thread_id, "as user", user);
+            if (!user) {
+                alert("Login first.");
+                window.location.hash = "login";
+                return;
+            };
+            // Get the posts
+            d3.xhr('/data/posts?thread_id=' + encodeURIComponent(new_thread_id))
+                .on("error", function(resp) { console.error(JSON.parse(resp.response)); })
+                .on('load', function(resp) {
+                    var rows = JSON.parse(resp.response),
+                        replies = [rows.shift()],
+                        posts = [],
+                        interjections_by_parent_id = {},
+                        usernames;
+                    // First sift through all posts returned and put them in either replies or interjections
+                    rows.forEach(function(post) {
+                        if (post.parent_id !== null) {
+                            if (!interjections_by_parent_id[post.parent_id]) {
+                                interjections_by_parent_id[post.parent_id] = [];
+                            }
+                            post.cssclass = 'interjection';
+                            interjections_by_parent_id[post.parent_id].push(post);
+                        } else {
+                            replies.push(post);
+                            post.cssclass = 'reply';
+                        }
+                    })
+                    replies[0].cssclass = 'op';
+                    // Second, reassemble the posts list in the order it should be displayed
+                    replies.forEach(function(reply) {
+                        posts.push(reply);
+                        if (interjections_by_parent_id[reply.id]) {
+                            interjections_by_parent_id[reply.id].sort(function(a, b) { return d3.descending(a.lasted, b.lasted); })
+                            interjections_by_parent_id[reply.id].forEach(function(interjection) {
+                                posts.push(interjection);
+                            });
+                            delete interjections_by_parent_id[reply.id];
+                        }
+                    });
+                    if (Object.keys(interjections_by_parent_id).length) {
+                        console.error("Orphaned posts: ", interjections_by_parent_id);
+                        alert("SHIT POST!");
+                        return;
+                    }
+                    // Third, Prime the users cache and render the thread
+                    usernames = [user];  // users required to render the current thread (user is required to render replyed)
+                    posts.forEach(function(post) {
+                        usernames.push(post.owner);
+                    })
+                    console.debug("Collated posts: ", posts);
+                    primeUsers(usernames, function() {
+                        renderPosts(posts);
+                        // XXX layering violation :(
+                        d3.select('#base_posted .thread_id').attr('value', new_thread_id); // XXX should this be property?
+                    });
+                })
+                .send('GET');
+        },
+        postPost = function(post, callback) {
+            console.log("Attempting to post", post);
+            d3.xhr('/data/post')
+                .on('error', function(e) {
+                    console.error(e);
+                    alert("SHIT POST");
+                 })
+                .on('load', function(resp) {
+                    console.log("GOOD JOB", resp.response);
+                    callback();
+                 })
+                .send('POST', JSON.stringify(post));
+        },
+
+// Application - Metaphorically a picture of how data is metaphorically shaped on the backend
+        // Given an element which is a post (or post editor), return the post JSON object
+        getPost = function(posted) {
+        var subject = posted.querySelector('.subject'),
+            content = posted.querySelector('.content'),
+            signature = posted.querySelector('.signature'),
+            owner = posted.querySelector('.owner'),
+            thread_id = posted.querySelector('.thread_id'),
+            id = posted.querySelector(".id"),
+            post = {
+                "owner": owner.value || owner.textContent,
+                "thread_id": thread_id.value || thread_id.textContent,
+                "subject": subject.value || subject.textContent,
+                "content": content.value || content.querySelector('.source').value,
+                "signature": signature.value || signature.textContent
+            };
+            if (id && id.value) {
+                post.id = id.value;
+            }
+            return post;
+        },
+        // return a 'div' DOM element representing "source" rendered according to the semantics of this function.
+        // it will also have a hidden input with class 'source' postpended
+        format = function(source) {
+            // tokens which can have formatting semantics. They'll show up in the token stream as strings
+            var formatting_tokens = ['__', '~~', '**', '//', '=', '>', '*', '\n', '[', ']', '|'],
+                parse = (function() {
+                    var flatten = function flatten(elemss) {
+                            var elems = [];
+                            elemss.forEach(function(new_elems) {
+                                elems.push.apply(elems, new_elems); // this is really just array concatenation
+                            });
+                            return elems;
+                        },
+                        // Wrap elemss[idx] in an elem_type
+                        wrap = function wrap (elem_type, idx) {
+                            return function(elemss) {
+                                var elem = document.createElement(elem_type);
+                                for (var i = 0; i < elemss[idx].length; i++) {
+                                    elem.appendChild(elemss[idx][i]);
+                                }
+                                return [elem];
+                            };
+                        },
+                        // Wrap all elements in the given elem_type
+                        collect = function collect(elem_type, properties) {
+                            if (!properties) {
+                                properties = {};
+                            }
+                            return function(elemss) {
+                                var elem = document.createElement(elem_type),
+                                    elems = flatten(elemss);
+                                elems.forEach(function(e) {
+                                    elem.appendChild(e);
+                                })
+                                Object.keys(properties).forEach(function(k) {
+                                    elem.setAttribute(k, properties[k]);
+                                })
+                                return [elem];
+                            }
+                        },
+                        link_composer = function(elemss) { // [url|spans]
+                            var url = elemss[1].map(function(n) { return n.textContent }).join(""),
+                                elems = elemss[3],
+                                elem = document.createElement('a');
+                            elem.setAttribute('href', url)
+                            if (elems === undefined) {
+                                elem.textContent = url;
+                            } else {
+                                elems.forEach(function(el) { elem.appendChild(el) });
+                            }
+                            return [elem];
+                        },
+                        // I think some nerds call these combinators.
+                        // They take some arguments as to what they match, some take a composer as the last argument, which is expected to combine the
+                        // results of the subparsers (i.e. take a list of lists of DOM nodes and return a list of DOM nodes)
+                        // The functions they return take a stream and return a (perhaps empty) flat list of DOM nodes, or undefined if they did not match.
+                        // They advance the tokenstream over what they matched when they do.
+
+                        // Returns a function that looks for 'token' and returns [], no composer
+                        tok = function tok(token) {
+                            return function tok_generated(token_stream) {
+                                if (token_stream.read(1)[0] == token) {
+                                    token_stream.advance(1);
+                                    return [];
+                                }
+                            };
+                        },
+                        // Returns a function that looks for 'token' and returns a singleton list with a text node of said token
+                        tok_lit = function tok_lit(token) {
+                            return function tok_lit_generated(token_stream) {
+                                if (token_stream.read(1)[0] == token) {
+                                    token_stream.advance(1);
+                                    return [document.createTextNode(token)]
+                                }
+                            };
+                        },
+                        // Tries a few things, passes the results of the first match up,
+                        // no composer
+                        or = function or() {
+                            var args = Array.from(arguments)
+                            return function or_generated(token_stream) {
+                                var elems, i;
+                                for (i = 0; i < args.length; i++) {
+                                    if (args[i].name === undefined) {
+                                        if (grammar[args[i]] === undefined) {
+                                            console.error("or could not find at runtime:", args[i]);
+                                        }
+                                        args[i] = grammar[args[i]];
+                                    }
+                                    elems = args[i](token_stream)
+                                    if (elems !== undefined) {
+                                        return elems;
+                                    }
+                                }
+                            }
+                        },
+                        // Checks for each of its arguments next to eachother.
+                        adjacent = function adjacent() {
+                            var args = Array.from(arguments),
+                                composer = args.pop();
+                            return function adj_generated(token_stream) {
+                                var pos = token_stream.tell(),
+                                    elems,
+                                    elemss = [],
+                                    i;
+                                for (i = 0; i < args.length; i++) {
+                                    if (args[i].name === undefined) {
+                                        if (grammar[args[i]] === undefined) {
+                                            console.error("adjacent could not find at runtime:", args[i]);
+                                        }
+                                        args[i] = grammar[args[i]];
+                                    }
+                                    elems = args[i](token_stream)
+                                    if (elems === undefined) {
+                                        token_stream.seek(pos);
+                                        return;
+                                    } else {
+                                        elemss.push(elems);
+                                    }
+                                }
+                                return composer(elemss);
+                            }
+                        },
+                        // checks for a given thing next to itself one or many times
+                        run = function run(segment, composer) {
+                            return function run_generated(token_stream) {
+                                var elems,
+                                    elemss = [],
+                                    i = 0;
+                                if (segment.name === undefined) {
+                                    if (grammar[segment] === undefined) {
+                                        console.error("run could not find at runtime:", segment);
+                                    }
+                                    segment = grammar[segment];
+                                }
+                                do {
+                                    elems = segment(token_stream);
+                                    //console.log("run invoked ", segment.name, segment.debug_name, "got", elems, "next", token_stream.read(1));
+                                    if (elems !== undefined) {
+                                        elemss.push(elems);
+                                    }
+                                } while(elems !== undefined);
+                                if (elemss.length > 0) {
+                                    return composer(elemss);
+                                }
+                            }
+                        },
+                        grammar = {
+                            'doc'       : adjacent(run('block', collect('div', {'class': 'formatted'})), tok(undefined), flatten),
+                            'block'     : or('bigtext', 'list', 'quote', 'text'),
+                            'bigtext'   : or(adjacent(tok('='), tok('='), run('span', flatten), tok('\n'), wrap('h2', 2)),
+                                             adjacent(tok('='), run('span', flatten), tok('\n'), wrap('h1', 1))),
+                            'text'      : run('line', collect('div')),
+                            'line'      : adjacent(or(adjacent('span_noblock', run('span', flatten), flatten), 'span_noblock', 'garbage'), run(tok_lit('\n'), flatten),
+                                function (elemss) {
+                                    var elems = elemss[0].slice();
+                                    elemss[1].forEach(function() {
+                                        elems.push(document.createElement('br'));
+                                    })
+                                    return elems;
+                                }),
+                            'garbage'   : run(or('content', tok_lit('__'), tok_lit('**'), tok_lit('~~'), tok_lit('//'),
+                                                 tok_lit('['), tok_lit('|'), tok_lit(']')), flatten),
+                            'span_noblock'      : or('content', 'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext', 'link', 'image'),
+                            'span'      : or('content', run('blockfmt', flatten),
+                                             'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext',
+                                             'link', 'image'),
+                            'blockfmt'  : or(tok_lit('='), tok_lit("*"), tok_lit(">")),
+                            'underlinetext' : adjacent(tok('__'), run('span', flatten), tok('__'), wrap('u', 1)),
+                            'strikethroughtext' : adjacent(tok('~~'), run('span', flatten), tok('~~'), wrap('del', 1)),
+                            'boldtext'  : adjacent(tok('**'), run('span', flatten), tok('**'), wrap('b', 1)),
+                            'italicstext'   : adjacent(tok('//'), run('span', flatten), tok('//'), wrap('i', 1)),
+                            'link'      : or(adjacent(tok('['), 'url', tok('|'), run('span', flatten), tok(']'), link_composer),
+                                             adjacent(tok('['), 'url', tok(']'), link_composer)),
+                            'image'     : adjacent(tok('['), 'url', tok('|'), tok(']'),
+                                function(elemss) {
+                                    var url = elemss[1].map(function(n) { return n.textContent }).join(""),
+                                        elem = document.createElement('img');
+                                    elem.setAttribute('src', url);
+                                    return [elem];
+                                }),
+                            'url'       : run(or('content', tok_lit('//')), flatten),
+                            'list'      : run('listitem', collect('ul')),
+                            'listitem'  : adjacent(tok('*'), run('span', flatten), tok('\n'), wrap('li', 1)),
+                            'quote'     : run('quoteitem', collect('div', {'class': 'quote'})),
+                            'quoteitem' : adjacent(tok_lit('>'), run('span', flatten), tok_lit('\n'), flatten),
+                            'content'   : function content(token_stream) {
+                                var tok = token_stream.read(1)[0],
+                                    elem;
+                                if (tok !== undefined && tok.is_content) {
+                                    elem = document.createTextNode(tok.join(""));
+                                    token_stream.advance(1);
+                                    return [elem];
+                                }
+                            }
+                        };
+                    Object.keys(grammar).forEach(function(k) {
+                        grammar[k].debug_name = k;
+                    });
+                    return grammar.doc;
+                })(),
+                token_stream = (function() {
+                    var tokens = [],
+                        current_token = [], // Use arrays of characters because you can't decorate normal strings and constructing them is slow
+                                            // Tokens other than runs of text are still normal strings.
+                        skip = 1,
+                        matched = false,
+                        stream_pos = 0;
+
+                    for (var pos = 0; pos < source.length; pos += skip) {
+                        matched = false,
+                        formatting_tokens.forEach(function(t) {
+                            if (matched) {
+                                return;
+                            }
+                            if (source.substr(pos, t.length) == t) {
+                                if (current_token.length) {
+                                    current_token.is_content = true; // this token is user content, not formatting metadata
+                                    tokens.push(current_token);
+                                }
+                                current_token = [];
+                                tokens.push(t);
+                                skip = t.length;
+                                matched = true;
+                            }
+                        })
+                        if (!matched) {
+                            current_token.push(source[pos]);
+                            skip = 1;
+                        }
+                    }
+                    if (current_token) {
+                        current_token.is_content = true;
+                        tokens.push(current_token);
+                    }
+                    if (tokens[tokens.length-1] != '\n') {
+                        tokens.push("\n");
+                    }
+                    return {
+                        "read": function(n) {
+                            return tokens.slice(stream_pos, stream_pos + n);
+                        },
+                        "advance": function(n) {
+                            stream_pos += n;
+                        },
+                        "seek": function(pos) {
+                            stream_pos = pos;
+                        },
+                        "tell": function() {
+                            return stream_pos;
+                        },
+                        "_token": tokens // for debugging.
+                    }
+                })(),
+                parsetree,
+                source_elem;
+            parsetree = parse(token_stream);
+            if (!parsetree) {
+                console.error("Post did not format.", token_stream._tokens);
+                parsetree = [document.createElement('div')];
+                parsetree[0].class = "unformatted";
+                parsetree[0].textContent = source;
+            }
+            source_elem = document.createElement('input')
+            source_elem.type = 'hidden';
+            source_elem.value = source;
+            source_elem.className = 'source';
+            parsetree[0].appendChild(source_elem);
+            return parsetree[0];
+        },
+        renderPosts = function(posts) {
+        var $posts = d3.select("#posts").selectAll("div.post")
+                    .data(posts, function(d) { return d.id;}),
+            $npost = $posts.enter()
+                    .append('div')
+                    .html(d3.select('#template').html()),
+            updatePost = function($post) {
+            // Set text, value, and src of elements with these classes to their corresponding data.
+            var fields = ['id', 'owner', 'subject', 'lasted', 'signature', 'thread_id'],
+                ownerFields = ['avatar', 'nick', 'title'];
+                fields.forEach(function(field) {
+                    var $field = $post.select('.' + field),
+                        func = (function(d) { return d[field]; });
+                    $field.attr('src', func);
+                    $field.attr('value', func);
+                    $field.text(func);
+                });
+                ownerFields.forEach(function(field) {
+                    var $field = $post.select('.' + field),
+                        func = (function(d) { return users[d.owner][field]; });
+                    $field.attr('src', func);
+                    $field.attr('value', func);
+                    $field.text(func);
+                });
+                $post.select('.nick').attr('href', function(d) {
+                    return '#profile/' + d.owner;
+                });
+                $post.attr('class', function(d) {
+                    if (d.cssclass) return 'post ' + d.cssclass;
+                    else return 'post';
+                });
+                $post.classed('mine', function(d) {
+                    return d.owner == user;
+                });
+                $post.classed('hascontent', function(d) {
+                    if (d.content && !/^\s*$/.test(d.content)) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                })
+                $post.select('.content')
+                    .html("")
+                    .append(function(d) {
+                        return format(d.content);
+                    });
+                $post.select('.edit')
+                    .on('click', function () {
+                        var posted = this.closest('.post'),
+                            post = getPost(posted),
+                            that = this;
+                        d3.select(posted).classed("posted", true);
+                        posted.querySelector('.content')
+                            .outerHTML = '<textarea class="content">' + post.content + '</textarea>';
+                        posted.querySelector('.subject')
+                            .outerHTML = '<input class="subject" value="' + post.subject + '" />';
+                    });
+                $post.select('.cancel')
+                    .on('click', function () {
+                        var posted = this.closest('.post'),
+                            thread = this.closest('.post').querySelector('.thread_id').value;
+                        if (d3.select(posted).classed('op')) {
+                            thread = this.closest('.post').querySelector('.id').value;
+                        }
+                        d3.select(posted).classed("posted", false);
+                        posted.querySelector('.subject')
+                            .outerHTML = '<div class="subject"></div>';
+                        posted.querySelector('.content')
+                            .outerHTML = '<div class="content"></div>';
+                        loadThread(thread);
+                    });
+                $post.select('.save')
+                    .on('click', function () {
+                        var posted = this.closest('.post'),
+                            post = getPost(posted), // XXX NO DATE
+                            thread = d3.select('#base_posted .thread_id').attr('value');
+                        console.log("Saving..");
+                        postPost(post, function() {
+                                // Post has been saved, unhide buttons,
+                                d3.select(posted).classed("posted", false);
+                                posted.querySelector('.subject')
+                                    .outerHTML = '<div class="subject"></div>';
+                                posted.querySelector('.content')
+                                    .outerHTML = '<div class="content">loading...</div>';
+                                loadThread(thread);
+                        });
+                    });
+                $post.select('.delete')
+                    .on('click', function() {
+                        var id = this.closest('.post').querySelector('.id').value,
+                            thread = this.closest('.post').querySelector('.thread_id').value;
+                        d3.xhr('/data/unpost?id=' + id)
+                        .on('error', function(e) {
+                            console.error(e);
+                            alert("SHIT POST");
+                        })
+                        .on('load', function(e) {
+                            loadThread(thread)
+                        })
+                        .send('GET');
+                    });
+                $post.select('.load')
+                    .on('click', function() {
+                        window.location.hash = "posts/" + this.closest('.post').querySelector('.id').value;
+                    });
+                $post.select('.unload')
+                    .on('click', function() {
+                        window.location.hash = "posts/" + this.closest('.post').querySelector('.thread_id').value;
+                    });
+                $post.select('.interject')
+                    .on('click', function(e) {
+                    var $nposted = d3.select(document.createElement("div")),
+                        that = this,
+                        thread = d3.select('#base_posted .thread_id').attr('value')
+                        $nposted.html(d3.select('#template').html())
+                            .attr('class', "post interjection posted")
+                            .attr('id', "")
+                        $nposted.select('.subject').node()
+                            .outerHTML = '<input class="subject" />';
+                        $nposted.select('.content').node()
+                            .outerHTML = '<textarea class="content"></textarea>';
+                        $nposted.select('.thread_id')
+                            .attr('value', thread);
+                        $nposted.select('.owner')
+                            .attr('value', user);
+                        $nposted.select('.signature')
+                            .text(users[user].signature);
+                        $nposted.select('.signature').text(users[user].signature);
+                        $nposted.select('.avatar').attr('src', users[user].avatar);
+                        $nposted.select('.title').text(users[user].title);
+                        $nposted.select('.nick').text(users[user].nick);
+                        $nposted.select('.interject')
+                            .on('click', function() {
+                            var post = getPost(this.closest('.post'));
+                                post.parent_id = that.closest('.post').querySelector('.id').value;
+                                postPost(post, function() {
+                                    console.log("INTERJECTED");
+                                    loadThread(thread);
+                                });
+                            });
+                        $nposted.datum({});
+                        $nposted.select('.cancel')
+                            .on('click', function() {
+                                $nposted.remove();
+                            });
+                        document.getElementById('posts')
+                            .insertBefore($nposted.node(), that.closest('.post').nextSibling)
+                    });
+            };
+            console.log("RENDERING POSTS:", posts);
+            $posts.exit().remove();
+            updatePost($npost);
+            updatePost($posts);
+            $posts.order();
+            // Set up the reply editor
+            d3.select("#base_posted .owner")
+                .attr('value', user)
+            d3.select('#base_posted .signature').text(users[user].signature);
+            d3.select('#base_posted .avatar').attr('src', users[user].avatar);
+            d3.select('#base_posted .title').text(users[user].title);
+            d3.select('#base_posted .nick').text(users[user].nick);
+            d3.select('#base_posted .reply')
+                .on('click', function() {
+                var posted = this.closest('.post');
+                var post = getPost(posted);
+                postPost(post, function() {
+                    loadThread(post.thread_id);
+                    posted.querySelector('.content').value = '';
+                });
+            });
+        },
+    // I heard cool kids used hash routers
+    // When you navigate to page foo:
+    //   The element with class "page" and an ID that starts with foo are set display:block
+    //   Other elements with class "page" are hidden. (display:none)
+    //   The tab with href "#foo" is set class=active, others have it removed
+    //   The function foo in this map is called with the remaining path elements as arguments and #foo_page as this
+        routes = {
+            'login': function() {
+                var $login_page = d3.select(this);
+                if(user) {
+                    $login_page.select('.user').text(user);
+                } else {
+                    $login_page.select('.user').text("");
+                }
+                $login_page.select('button.logout').on('click', function() {
+                    logout(function() {
+                        d3.selectAll('#posts div.post').remove();
+                        $login_page.select('.user').text("");
+                    });
+                });
+                $login_page.select('button.login').on('click', function() {
+                    var username = $login_page.select('.username').property('value'),
+                        password = $login_page.select('.password').property('value');
+                    console.log('Attempting login as', username, password);
+                    login(username, password, function() {
+                        if(!user) {
+                            alert("WRONG!");
+                            return;
+                        };
+                        $login_page.select('.user').text(user);
+                        window.location.hash = "posts/0";
+                    });
+                });
+            },
+            'register': function() {
+                var $register_page = d3.select(this);
+                $register_page.select('button.register').on('click', function() {
+                    var username = $register_page.select('input.username').property('value'),
+                        nick = $register_page.select('input.nick').property('value'),
+                        signature = $register_page.select('input.signature').property('value'),
+                        avatar = $register_page.select('input.avatar').property('value'),
+                        password = $register_page.select('input.password').property('value'),
+                        password2 = $register_page.select('input.password2').property('value'),
+                        passcode = $register_page.select('input.passcode').property('value');
+                    if (password != password2) {
+                        alert('Passwords do not match');
+                        return;
+                    }
+                    if (!username.match(/^\w+$/)) {
+                        alert('Username is not a word');
+                        return;
+                    }
+                    registerUser(username, {
+                        'password': password,
+                        'nick': nick,
+                        'signature': signature,
+                        'avatar': avatar,
+                        'passcode': passcode,
+                    }, function() {
+                        alert('Registered ' + username + '. :D');
+                        user = username;
+                        window.location.hash = 'posts/0';
+                    });
+                });
+            },
+            'posts': function(post) {
+                if (post) {
+                    loadThread(post);
+                } else {
+                    window.location.hash = 'posts/0';
+                    return;
+                }
+            },
+            'profile': function(username) {
+                var $profile_page = d3.select(this);
+                if (!username) {
+                    if (!user) {
+                        alert('Login first.');
+                        window.location.hash = 'login';
+                        return;
+                    }
+                    window.location.hash = 'profile/' + user;
+                    return;
+                }
+                console.debug('Loading profile for: ', username);
+                primeUsers([username], function() {
+                    $profile_page.classed('mine', user == username);
+                    // Damnit, HTML, why is there no consistent "the thing I'm displaying" property/attr/css
+                    $profile_page.select('input.username').property('value', username);
+                    $profile_page.select('span.username').text(username);
+                    $profile_page.select('input.nick').property('value', users[username].nick);
+                    $profile_page.select('span.nick').text(users[username].nick);
+                    $profile_page.select('img.avatar').attr('src', users[username].avatar);
+                    $profile_page.select('input.avatar').property("value", users[username].avatar);
+                    $profile_page.select('textarea.signature').property('value', users[username].signature);
+                    $profile_page.select('div.signature').text(users[username].signature);
+                    $profile_page.select('input.password').property('value', "");
+                    $profile_page.select('input.password2').property('value', "");
+
+                    $profile_page.select('button.save')
+                    .on('click', function() {
+                        var fields = {
+                                'nick': $profile_page.select('input.nick').property('value'),
+                                'avatar': $profile_page.select('input.avatar').property('value'),
+                                'signature': $profile_page.select('textarea.signature').property('value'),
+                                'password': $profile_page.select('input.password').property('value')
+                            };
+
+                        if (fields.password != $profile_page.select('input.password2').property('value')) {
+                            alert("Passwords don't match.");
+                            return;
+                        }
+                        if (!fields.password) { // If there's no password change, pass through the old password fields
+                            delete fields.password;
+                        }
+                        updateUser(user, fields, function() {
+                            delete users[username]; // Users cache will be reprimed when we load the profile
+                            alert("Updated!");
+                            window.location.hash = "profile";
+                        });
+                    });
+                    console.debug("Rendered profile for", username);
+                });
+            },
+            "help": function() {
+                var $help_page = d3.select(this)
+                $help_page.select('button.render')
+                .on('click', function() {
+                    $help_page.select('div.help')
+                        .html("")
+                        .append(function() {
+                            return format($help_page.select('textarea.help').property('value'))
+                        });
+                })
+                .on('click')()
+            }
+        },
+        route = function(hash) {
+            var path_elements = hash.slice(1).split("/"),
+                page = path_elements.shift(),
+                page_elem = d3.select('#' + page + "_page")[0][0];
+            console.debug("Navigating to", page, "(", path_elements, ")");
+            d3.selectAll('body').classed("loading", true);
+            login(null, null, function() {
+                d3.selectAll('body').classed("loading", false);
+                d3.select('body').classed("loggedin", !!user);
+                if (page) {
+                    d3.selectAll('.page')
+                    .classed("active", function(d) { return this.id.startsWith(page); });
+                    d3.selectAll('#topbar a')
+                    .classed("active", function(d) { return this.href.slice(1).split("/")[0] == page; });
+                    routes[page].apply(page_elem, path_elements);
+                } else { // Did you really want to navigate to nowhere?
+                    console.log("hash", hash, "appears to go nowhere");
+                    d3.selectAll('.page').classed("active", false);
+                    d3.selectAll('#topbar a').classed("active", false);
+                }
+            })
+        };
+    window.addEventListener('hashchange', function() {route(window.location.hash)});
+    if(!window.location.hash) {
+        window.location.hash = "help";
+    } else {
+        route(window.location.hash);
+    }
+});
+</script>
 <style type="text/css">
 /*
 This is made up of
@@ -13,6 +894,7 @@ This is made up of
     black background,
     and a dash of #222
 */
+
 /* Overall Bullshit */
 body {
     font-family: monospace;
@@ -20,6 +902,7 @@ body {
     color: #0FF;
     margin: 0;
     padding-bottom: 10pt; /* Good things are measured in points */
+    padding-top: 2em;
 }
 input,textarea,button,#topbar a {
     background-color: #222;
@@ -44,13 +927,16 @@ input[type="test"]:disabled {
     background: #000;
 }
 /* Bullshit for static elements and containers */
+.page {
+    margin-top: 2em;
+}
 #topbar {
-    padding: 2pt;
-    position: static;
+    padding: 5pt;
+    position: fixed;
     width:100%;
-    margin: 3pt 0 3pt 0;
-    padding-bottom: -1pt;
     border-bottom: 1pt solid #0FF;
+    background-color: black;
+    top: 0;
 }
 #topbar a {
     text-decoration: none;
@@ -198,7 +1084,7 @@ measure to make bogus requests impossible. Bogus requests are always possible,
 and dealing with them is the backend's problem.
 */
 .page.active {
-    display: initial;
+    display: block;
 }
 .page {
     display: none;
@@ -209,6 +1095,9 @@ and dealing with them is the backend's problem.
 }
 .loggedin button.logout{
     display: initial;
+}
+.loggedin .credentials {
+    display: none;
 }
 button.logout {
     display: none;
@@ -223,59 +1112,148 @@ p.loggedon {
 .loggedin #register_tab {
     display: none;
 }
-/*
-.post.reply .interject {
+/* Bullshit for the profile page */
+#profile_page input {
+    display: none;
+}
+#profile_page textarea {
+    display: none;
+}
+#profile_page.mine textarea {
     display: initial;
 }
-.post.op .unload {
+#profile_page.mine input {
     display: initial;
 }
-.post.op .interject {
+#profile_page.mine span {
+    display: none;
+}
+#profile_page .save {
+    display: none;
+}
+#profile_page.mine .save {
+    display: initial;
+}
+#profile_page tr.password {
+    display: none;
+}
+#profile_page.mine tr.password {
+    display: table-row; /* why doesn't "initial" work here? */
+}
+
+/* Bullshit for posts */
+.post .content {
+    display: none;
+}
+.post.hascontent .content {
+    display: block; /* initial doesn't work here either? */
+}
+.post.posted textarea.content {
+    display: initial;
+}
+.post.interjection.posted .content {
     display: initial;
 }
 .post.interjection .content {
     display: none;
 }
+
 .post.interjection .signature {
     display: none;
 }
-.post.interjection .load {
-    display: initial;
-}
-.post.interjection.posted .load {
+.post:not(.hascontent) .signature {
     display: none;
 }
-.post.interjection.posted .delete {
-    display: none;
-}
-.post.interjection.posted .content {
-    display: initial;
+.post.posted:not(.hascontent) .signature {
+    display: block;
 }
 .post.interjection.posted .signature {
     display: block;
 }
-.post.posted .save {
-    display: initial;
+#base_posted .signature {
+    display: block;
 }
-.post.posted.interjection .save {
+
+.post button.unload {
     display: none;
 }
-.post.posted .cancel {
+.post.op button.unload {
     display: initial;
 }
-.post.posted .edit {
-    display: none !important;
+.post.posted button.unload {
+    display: none;
 }
-.post.replyed .reply {
+
+.post button.edit {
+    display: none;
+}
+.post.mine button.edit {
     display: initial;
 }
-.post.mine .edit {
+.post.mine.interjection button.edit {
+    display: none;
+}
+.post.posted button.edit {
+    display: none;
+}
+
+.post button.save {
+    display: none;
+}
+.post.posted button.save {
     display: initial;
 }
-.post.mine .delete {
+.post.interjection.posted button.save {
+    display: none;
+}
+
+.post button.cancel {
+    display: none;
+}
+.post.posted button.cancel {
     display: initial;
 }
-*/
+
+.post button.delete {
+    display: none;
+}
+.post.mine button.delete {
+    display: initial;
+}
+
+.post button.load {
+    display: none;
+}
+.post.interjection button.load {
+    display: initial;
+}
+.post.interjection.posted button.load {
+    display: none;
+}
+
+.post button.interject {
+    display: none;
+}
+.post.reply button.interject {
+    display: initial;
+}
+.post.interjection.posted button.interject {
+    display: initial;
+}
+.post.reply.posted button.interject {
+    display: none;
+}
+
+.post button.reply {
+    display: none;
+}
+#base_posted button.reply {
+    display: initial;
+}
+
+#base_posted input.subject {
+    display: none;
+}
 
 /* Bullshit for the formatter */
 .formatted .quote {
@@ -307,888 +1285,6 @@ textarea.help {
     height: 40em;
 }
 </style>
-<title>STAY OUT!</title>
-<script>
-"use strict";
-// Model - Literally a picture of how data is literally shaped on the backend
-/*
-thread_id is the id of the thread you would be replying to if you hit 'reply'.
-
-|-  means: thread_id points to ID of post in the column where | is.
-|-- means: '' and also this is an interjection on the |-'d post closest above it (its parent_id points there)
-
-"0" (default thread_id)
--(Reply0)                       # Reply0 is the OP (post with _id = thread_id)
-|-Reply1
-|-Reply2                        # There is no Reply2Int0.
-|--Reply2Int1  (Reply0)         # Identified as interjections by having parent_id set
-   |-Reply2Int1 Reply1          # not displayed in this thread
-   |-...        Reply...
-|--Reply2Int2
-|-Reply3
-|-...
-^ current thread_id
->>>^ go in one level by setting current thread_id to Reply2Int1
-
-Reply2Int1 (OP)
-|-Reply2Int1Reply1              # displayed in this thread
-|-...
-<<<^ go up one level by loading OP's thread_id
-*/
-// call primeUsers() to ensure that a given set of user data is in here
-var users = { // User data. Users missing these fields may not render correctly. There may be more, because #schemaless
-    "": { // Defaults
-        "nick": "",
-        "title": "",
-        "avatar": "",
-        "signature": ""
-    }
-}
-
-// DataModel - Metaphorically a picture of how data is literally shaped on the frontend.
-document.addEventListener("DOMContentLoaded", function() {
-    var user = "", // Current logged in username
-        logout = function(callback) {
-            d3.xhr('/data/_sessions', function(response) {
-                delete users[user];
-                user = "";
-                d3.select('body').classed('loggedin', false); // XXX layering violation
-                // CSSTHIS $login_page.select('.loggedon').style('display', 'none');
-                callback();
-            })
-            .send('DELETE');
-        },
-        // users_id and password may be null
-        login = function(users_id, password, callback) {
-        var xhr = d3.xhr('/data/_sessions')
-            .on('load', function(resp) {
-                var response = JSON.parse(resp.response);
-                console.log("login response: ", response);
-                if (response === null) {
-                    console.error('Unsuccessful login');
-                    alert('Unauthorized!');
-                    return;
-                }
-                user = response.users_id;
-                primeUsers([user], function() {
-                    d3.select('body').classed('loggedin', true);
-                    callback();
-                });
-            })
-            .on('error', function(resp) {
-                console.log("Login error: ", resp.response);
-                // alert("SHIT POST");
-                d3.select('body').classed('loggedin', false); // XXX layering violation
-                // CSSTHIS $login_page.select('.loggedon').style('display', 'none');
-                callback();
-            });
-            if (user) {
-                callback();
-                return;
-            }
-            if (users_id !== null) { // check for an existing session.
-                xhr.header('Authorization', "Basic " + btoa(users_id + ":" + password));
-            }
-            xhr.send('GET');
-        },
-        // This mutates fields
-        registerUser = function(users_id, fields, callback) {
-            console.debug("Registering user", user, "to", fields);
-            d3.xhr('/data/_register?id=' + encodeURIComponent(users_id))
-            .on('load', function(resp) {
-                var d = JSON.parse(resp.response);
-                user = d['users_id']
-                primeUsers([user], callback)
-                console.debug('Registered user: ', users_id);
-            })
-            .on('error', function(resp) {
-                alert('SHIT POST ' + resp.status);
-                console.error('Something bad happened', resp);
-            })
-            .header('Content-Type', 'application/json')
-            .send('POST', JSON.stringify(fields));
-        },
-        updateUser = function(users_id, fields, callback) {
-            console.debug("Updating user", user, "to", fields);
-            if (fields["password"] !== undefined) {
-                fields["password_sha256"] = sjcl.codec.hex.fromBits(sjcl.hash.sha256.hash(fields["password"]));
-                delete fields["password"];
-            }
-            d3.xhr('/data/users')
-            .on('load', function(resp) {
-                console.log("Successfully updated ", users_id);
-                callback();
-            })
-            .on('error', function(resp) {
-                console.error("User update failed", resp);
-                alert("SHIT POST");
-            })
-            .header('Content-Type', 'application/json')
-            .send('POST', JSON.stringify(fields));
-        },
-        primeUsers = (function(usernames, cb) {
-        // `usernames` should be an array of usernames, cb will be invoked when they are all in `users`
-            var uncached_by_username = {},
-                requests = 0,
-                log_cb = (function() {
-                    requests--;
-                    if (requests <= 0) {
-                        console.debug("Primed users cache for ", usernames, "as", user, "result: ", users);
-                        cb();
-                    }
-                });
-            console.log("Priming usrs cache, cookie:", document.cookie);
-            // Build a list of users we don't have in 'users,' then make a request if there actually are any
-            usernames.forEach(function(username) {
-                if (!users[username]) {
-                    uncached_by_username[username] = true;
-                }
-            });
-            if (Object.keys(uncached_by_username).length === 0) {
-                console.debug("Users cache hit all");
-                log_cb();
-                return;
-            }
-            // XXX make backend support getting multiple keys at once. As it is we just make a fuckton of requests.
-            Object.keys(uncached_by_username).forEach(function(username) {
-                requests += 1;
-                d3.xhr("/data/users/?id=" + encodeURIComponent(username), function(resp) {
-                    var rows = JSON.parse(resp.response);
-                    rows.forEach(function(row) {
-                        var username;
-                        if (row.error) {
-                            console.error("Error finding user ", username, ":", row);
-                            alert("SHIT POST")
-                        }
-                        username = row.id;
-                        users[username] = row;
-                    });
-                    log_cb();
-                })
-                .on("error", function(resp) {
-                    console.error("Error priming users cache for ", usernames, ":", resp);
-                    alert("SHIT POST!")
-                })
-                .header("Content-Type", "application/json")
-                .send("GET");
-            });
-        }),
-        loadThread = function(new_thread_id) {
-        // This function works by making three requests. First it makes one for the OP and one for the replies at the same time.
-        // The results are then put into replies and interjections_by_parent_id such that OP is first in replies.
-        // When requests reaches zero, actuallyLoadThread is called, it sorts and collates replies into `posts`,
-        // Then it compiles a list of usernames owning posts in the thread (which will be required to render), primes the users
-        // cache with them (the third request), and then calls renderPosts(posts) once everything is in place
-            console.debug("Loading thread ", new_thread_id, "as user", user);
-            if (!user) {
-                alert("Login first.");
-                window.location.hash = "login";
-                return;
-            };
-            // Get the posts
-            d3.xhr('/data/posts?thread_id=' + encodeURIComponent(new_thread_id))
-                .on("error", function(resp) { console.error(JSON.parse(resp.response)); })
-                .on('load', function(resp) {
-                    var rows = JSON.parse(resp.response),
-                        replies = [rows.shift()],
-                        posts = [],
-                        interjections_by_parent_id = {},
-                        usernames;
-                    // First sift through all posts returned and put them in either replies or interjections
-                    rows.forEach(function(post) {
-                        if (post.parent_id !== null) {
-                            if (!interjections_by_parent_id[post.parent_id]) {
-                                interjections_by_parent_id[post.parent_id] = [];
-                            }
-                            post.cssclass = 'interjection';
-                            interjections_by_parent_id[post.parent_id].push(post);
-                        } else {
-                            replies.push(post);
-                            post.cssclass = 'reply';
-                        }
-                    })
-                    // Second, reassemble the posts list in the order it should be displayed
-                    replies.forEach(function(reply) {
-                        posts.push(reply);
-                        if (interjections_by_parent_id[reply.id]) {
-                            interjections_by_parent_id[reply.id].sort(function(a, b) { return d3.descending(a.lasted, b.lasted); })
-                            interjections_by_parent_id[reply.id].forEach(function(interjection) {
-                                posts.push(interjection);
-                            });
-                            delete interjections_by_parent_id[reply.id];
-                        }
-                    });
-                    if (Object.keys(interjections_by_parent_id).length) {
-                        console.error("Orphaned posts: ", interjections_by_parent_id);
-                        alert("SHIT POST!");
-                        return;
-                    }
-                    // Third, Prime the users cache and render the thread
-                    usernames = [user];  // users required to render the current thread (user is required to render replyed)
-                    posts.forEach(function(post) {
-                        usernames.push(post.owner);
-                    })
-                    console.debug("Collated posts: ", posts);
-                    primeUsers(usernames, function() {
-                        renderPosts(posts);
-                        // XXX layering violation :(
-                        d3.select('#base_posted .thread_id').attr('value', new_thread_id); // XXX should this be property?
-                    });
-                })
-                .send('GET');
-        },
-        // Given an element which is a post (or post editor), return the post JSON object
-        getPost = function(posted) {
-        var subject = posted.querySelector('.subject'),
-            content = posted.querySelector('.content'),
-            signature = posted.querySelector('.signature'),
-            owner = posted.querySelector('.owner'),
-            thread_id = posted.querySelector('.thread_id'),
-            id = posted.querySelector(".id"),
-            post = {
-                "owner": owner.value || owner.textContent,
-                "thread_id": thread_id.value || thread_id.textContent,
-                "subject": subject.value || subject.textContent,
-                "content": content.value || content.textContent,
-                "signature": signature.value || signature.textContent
-            };
-            if (id && id.value) {
-                post.id = id.value;
-            }
-            return post;
-        },
-        postPost = function(post, callback) {
-            console.log("Attempting to post", post);
-            d3.xhr('/data/post')
-                .on('error', function(e) {
-                    console.error(e);
-                    alert("SHIT POST");
-                 })
-                .on('load', function(resp) {
-                    console.log("GOOD JOB", resp.response);
-                    callback();
-                 })
-                .send('POST', JSON.stringify(post));
-        },
-
-// Application - Metaphorically a picture of how data is metaphorically shaped on the backend
-        // return a 'div' DOM element representing "source" rendered according to the semantics of this function.
-        format = function(source) {
-            // tokens which can have formatting semantics. They'll show up in the token stream as strings
-            var formatting_tokens = ['__', '~~', '**', '//', '=', '>', '*', '\n', '[', ']', '|'],
-                parse = (function() {
-                    var flatten = function flatten(elemss) {
-                            var elems = [];
-                            elemss.forEach(function(new_elems) {
-                                elems.push.apply(elems, new_elems); // this is really just array concatenation
-                            });
-                            return elems;
-                        },
-                        // Wrap elemss[idx] in an elem_type
-                        wrap = function wrap (elem_type, idx) {
-                            return function(elemss) {
-                                var elem = document.createElement(elem_type);
-                                for (var i = 0; i < elemss[idx].length; i++) {
-                                    elem.appendChild(elemss[idx][i]);
-                                }
-                                return [elem];
-                            };
-                        },
-                        // Wrap all elements in the given elem_type
-                        collect = function collect(elem_type, properties) {
-                            if (!properties) {
-                                properties = {};
-                            }
-                            return function(elemss) {
-                                var elem = document.createElement(elem_type),
-                                    elems = flatten(elemss);
-                                elems.forEach(function(e) {
-                                    elem.appendChild(e);
-                                })
-                                Object.keys(properties).forEach(function(k) {
-                                    elem.setAttribute(k, properties[k]);
-                                })
-                                return [elem];
-                            }
-                        },
-                        link_composer = function(elemss) { // [url|spans]
-                            var url = elemss[1].map(function(n) { return n.textContent }).join(""),
-                                elems = elemss[3],
-                                elem = document.createElement('a');
-                            elem.setAttribute('href', url)
-                            if (elems === undefined) {
-                                elem.textContent = url;
-                            } else {
-                                elems.forEach(function(el) { elem.appendChild(el) });
-                            }
-                            return [elem];
-                        },
-                        // I think some nerds call these combinators.
-                        // They take some arguments as to what they match, some take a composer as the last argument, which is expected to combine the
-                        // results of the subparsers (i.e. take a list of lists of DOM nodes and return a list of DOM nodes)
-                        // The functions they return take a stream and return a (perhaps empty) flat list of DOM nodes, or undefined if they did not match.
-                        // They advance the tokenstream over what they matched when they do.
-
-                        // Returns a function that looks for 'token' and returns [], no composer
-                        tok = function tok(token) {
-                            return function tok_generated(token_stream) {
-                                if (token_stream.read(1)[0] == token) {
-                                    token_stream.advance(1);
-                                    return [];
-                                }
-                            };
-                        },
-                        // Returns a function that looks for 'token' and returns a singleton list with a text node of said token
-                        tok_lit = function tok_lit(token) {
-                            return function tok_lit_generated(token_stream) {
-                                if (token_stream.read(1)[0] == token) {
-                                    token_stream.advance(1);
-                                    return [document.createTextNode(token)]
-                                }
-                            };
-                        },
-                        // Tries a few things, passes the results of the first match up,
-                        // no composer
-                        or = function or() {
-                            var args = Array.from(arguments)
-                            return function or_generated(token_stream) {
-                                var elems, i;
-                                for (i = 0; i < args.length; i++) {
-                                    if (args[i].name === undefined) {
-                                        if (grammar[args[i]] === undefined) {
-                                            console.error("or could not find at runtime:", args[i]);
-                                        }
-                                        args[i] = grammar[args[i]];
-                                    }
-                                    elems = args[i](token_stream)
-                                    //console.log("or invoked ", args[i].name, args[i].debug_name, "got", elems, "next", token_stream.read(1));
-                                    if (elems !== undefined) {
-                                        return elems;
-                                    }
-                                }
-                            }
-                        },
-                        // Checks for each of its arguments next to eachother.
-                        adjacent = function adjacent() {
-                            var args = Array.from(arguments),
-                                composer = args.pop();
-                            return function adj_generated(token_stream) {
-                                var pos = token_stream.tell(),
-                                    elems,
-                                    elemss = [],
-                                    i;
-                                for (i = 0; i < args.length; i++) {
-                                    if (args[i].name === undefined) {
-                                        if (grammar[args[i]] === undefined) {
-                                            console.error("adjacent could not find at runtime:", args[i]);
-                                        }
-                                        args[i] = grammar[args[i]];
-                                    }
-                                    elems = args[i](token_stream)
-                                    //console.log("adj invoked ", args[i].name, args[i].debug_name, "got", elems, "next", token_stream.read(1));
-                                    if (elems === undefined) {
-                                        token_stream.seek(pos);
-                                        return;
-                                    } else {
-                                        elemss.push(elems);
-                                    }
-                                }
-                                return composer(elemss);
-                            }
-                        },
-                        // checks for a given thing next to itself one or many times
-                        run = function run(segment, composer) {
-                            return function run_generated(token_stream) {
-                                var elems,
-                                    elemss = [],
-                                    i = 0;
-                                if (segment.name === undefined) {
-                                    if (grammar[segment] === undefined) {
-                                        console.error("run could not find at runtime:", segment);
-                                    }
-                                    segment = grammar[segment];
-                                }
-                                do {
-                                    elems = segment(token_stream);
-                                    //console.log("run invoked ", segment.name, segment.debug_name, "got", elems, "next", token_stream.read(1));
-                                    if (elems !== undefined) {
-                                        elemss.push(elems);
-                                    }
-                                } while(elems !== undefined);
-                                if (elemss.length > 0) {
-                                    return composer(elemss);
-                                }
-                            }
-                        },
-                        grammar = {
-                            'doc'       : adjacent(run('block', collect('div', {'class': 'formatted'})), tok(undefined), flatten),
-                            'block'     : or('bigtext', 'list', 'quote', 'text'),
-                            'bigtext'   : or(adjacent(tok('='), tok('='), run('span', flatten), tok('\n'), wrap('h2', 2)),
-                                             adjacent(tok('='), run('span', flatten), tok('\n'), wrap('h1', 1))),
-                            'text'      : run('line', collect('div')),
-                            'line'      : adjacent(or(adjacent('span_noblock', run('span', flatten), flatten), 'span_noblock', 'garbage'), run(tok_lit('\n'), flatten),
-                                function (elemss) {
-                                    var elems = elemss[0].slice();
-                                    elemss[1].forEach(function() {
-                                        elems.push(document.createElement('br'));
-                                    })
-                                    return elems;
-                                }),
-                            'garbage'   : run(or('content', tok_lit('__'), tok_lit('**'), tok_lit('~~'), tok_lit('//'),
-                                                 tok_lit('['), tok_lit('|'), tok_lit(']')), flatten),
-                            'span_noblock'      : or('content', 'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext', 'link', 'image'),
-                            'span'      : or('content', run('blockfmt', flatten),
-                                             'underlinetext', 'strikethroughtext', 'boldtext', 'italicstext',
-                                             'link', 'image'),
-                            'blockfmt'  : or(tok_lit('='), tok_lit("*"), tok_lit(">")),
-                            'underlinetext' : adjacent(tok('__'), run('span', flatten), tok('__'), wrap('u', 1)),
-                            'strikethroughtext' : adjacent(tok('~~'), run('span', flatten), tok('~~'), wrap('del', 1)),
-                            'boldtext'  : adjacent(tok('**'), run('span', flatten), tok('**'), wrap('b', 1)),
-                            'italicstext'   : adjacent(tok('//'), run('span', flatten), tok('//'), wrap('i', 1)),
-                            'link'      : or(adjacent(tok('['), 'url', tok('|'), run('span', flatten), tok(']'), link_composer),
-                                             adjacent(tok('['), 'url', tok(']'), link_composer)),
-                            'image'     : adjacent(tok('['), 'url', tok('|'), tok(']'),
-                                function(elemss) {
-                                    var url = elemss[1].map(function(n) { return n.textContent }).join(""),
-                                        elem = document.createElement('img');
-                                    elem.setAttribute('src', url);
-                                    return [elem];
-                                }),
-                            'url'       : run(or('content', tok_lit('//')), flatten),
-                            'list'      : run('listitem', collect('ul')),
-                            'listitem'  : adjacent(tok('*'), run('span', flatten), tok('\n'), wrap('li', 1)),
-                            'quote'     : run('quoteitem', collect('div', {'class': 'quote'})),
-                            'quoteitem' : adjacent(tok_lit('>'), run('span', flatten), tok_lit('\n'), flatten),
-                            'content'   : function content(token_stream) {
-                                var tok = token_stream.read(1)[0],
-                                    elem;
-                                if (tok !== undefined && tok.is_content) {
-                                    elem = document.createTextNode(tok.join(""));
-                                    token_stream.advance(1);
-                                    return [elem];
-                                }
-                            }
-                        };
-                    Object.keys(grammar).forEach(function(k) {
-                        grammar[k].debug_name = k;
-                    });
-                    return grammar.doc;
-                })(),
-                token_stream = (function() {
-                    var tokens = [],
-                        current_token = [], // Use arrays of characters because you can't decorate normal strings and constructing them is slow
-                                            // Tokens other than runs of text are still normal strings.
-                        skip = 1,
-                        matched = false,
-                        stream_pos = 0;
-
-                    for (var pos = 0; pos < source.length; pos += skip) {
-                        matched = false,
-                        formatting_tokens.forEach(function(t) {
-                            if (matched) {
-                                return;
-                            }
-                            if (source.substr(pos, t.length) == t) {
-                                if (current_token.length) {
-                                    current_token.is_content = true; // this token is user content, not formatting metadata
-                                    tokens.push(current_token);
-                                }
-                                current_token = [];
-                                tokens.push(t);
-                                skip = t.length;
-                                matched = true;
-                            }
-                        })
-                        if (!matched) {
-                            current_token.push(source[pos]);
-                            skip = 1;
-                        }
-                    }
-                    if (current_token) {
-                        current_token.is_content = true;
-                        tokens.push(current_token);
-                    }
-                    if (tokens[tokens.length-1] != '\n') {
-                        tokens.push("\n");
-                    }
-                    return {
-                        "read": function(n) {
-                            return tokens.slice(stream_pos, stream_pos + n);
-                        },
-                        "advance": function(n) {
-                            stream_pos += n;
-                        },
-                        "seek": function(pos) {
-                            stream_pos = pos;
-                        },
-                        "tell": function() {
-                            return stream_pos;
-                        },
-                        "_token": tokens // for debugging.
-                    }
-                })(),
-                parsetree;
-            parsetree = parse(token_stream);
-            if (!parsetree) {
-                console.error("Post did not format.", token_stream._tokens);
-                parsetree = [document.createElement('div')];
-                parsetree[0].class = "unformatted";
-                parsetree[0].textContent = source;
-                return parsetree[0];
-            }
-            return parsetree[0];
-
-            return elem;
-        },
-        renderPosts = function(posts) {
-        var $posts = d3.select("#posts").selectAll("div.post")
-                    .data(posts, function(d) { return d.id;}),
-            $npost = $posts.enter()
-                    .append('div')
-                    .html(d3.select('#template').html()),
-            updatePost = function($post) {
-            // Set text, value, and src of elements with these classes to their corresponding data.
-            var fields = ['id', 'owner', 'subject', 'lasted', 'signature', 'thread_id'],
-                ownerFields = ['avatar', 'nick', 'title'];
-                fields.forEach(function(field) {
-                    var $field = $post.select('.' + field),
-                        func = (function(d) { return d[field]; });
-                    $field.attr('src', func);
-                    $field.attr('value', func);
-                    $field.text(func);
-                });
-                ownerFields.forEach(function(field) {
-                    var $field = $post.select('.' + field),
-                        func = (function(d) { return users[d.owner][field]; });
-                    $field.attr('src', func);
-                    $field.attr('value', func);
-                    $field.text(func);
-                });
-                $post.select('.nick').attr('href', function(d) {
-                    return '#profile/' + d.owner;
-                });
-                $post.attr('class', function(d) {
-                    if (d.cssclass) return 'post ' + d.cssclass;
-                    else return 'post';
-                });
-                $post.classed('mine', function(d) {
-                    return d.owner == user;
-                });
-                $post.select('.content')
-                    .classed('hascontent', function(d) {
-                        return !!d.content;
-                    })
-                    //CSSTHIS .style('display', function(d) { return d.content ? null : "none"; })
-                    .html("")
-                    .append(function(d) {
-                        return format(d.content);
-                    });
-                $post.select('.edit')
-                    .on('click', function () {
-                        // Clicked "edit"
-                        var posted = this.closest('.post'),
-                            post = getPost(posted),
-                            that = this;
-                        d3.select(posted).classed("posted", true);
-                        posted.querySelector('.content')
-                            .outerHTML = '<textarea class="content">' + post.content + '</textarea>';
-                        posted.querySelector('.subject')
-                            .outerHTML = '<input class="subject" value="' + post.subject + '" />';
-                    });
-                $post.select('.cancel')
-                    .on('click', function () {
-                        var posted = this.closest('.post'),
-                            thread = this.closest('.post').querySelector('.thread_id').value;
-                        d3.select(posted).classed("posted", false);
-                        posted.querySelector('.subject')
-                            .outerHTML = '<div class="subject"></div>';
-                        posted.querySelector('.content')
-                            .outerHTML = '<div class="content"></div>';
-                        loadThread(thread);
-                    });
-                $post.select('.save')
-                    .on('click', function () {
-                        var posted = this.closest('.post'),
-                            post = getPost(posted), // XXX NO DATE
-                            thread = d3.select('#base_posted .thread_id').attr('value');
-                        console.log("Saving..");
-                        postPost(post, function() {
-                                // Post has been saved, unhide buttons,
-                                d3.select(posted).classed("posted", false);
-                                posted.querySelector('.subject')
-                                    .outerHTML = '<div class="subject"></div>';
-                                posted.querySelector('.content')
-                                    .outerHTML = '<div class="content">loading...</div>';
-                                loadThread(thread);
-                        });
-                    });
-                $post.select('.delete')
-                    .on('click', function() {
-                        var id = this.closest('.post').querySelector('.id').value,
-                            thread = this.closest('.post').querySelector('.thread_id').value;
-                        d3.xhr('/data/unpost?id=' + id)
-                        .on('error', function(e) {
-                            console.error(e);
-                            alert("SHIT POST");
-                        })
-                        .on('load', function(e) {
-                            loadThread(thread)
-                        })
-                        .send('GET');
-                    });
-                $post.select('.load')
-                    .on('click', function() {
-                        window.location.hash = "posts/" + this.closest('.post').querySelector('.id').value;
-                    });
-                $post.select('.unload')
-                    .on('click', function() {
-                        window.location.hash = "posts/" + this.closest('.post').querySelector('.thread_id').value;
-                    });
-                $post.select('.interject')
-                    .on('click', function(e) {
-                    var $nposted = d3.select(document.createElement("div")),
-                        that = this,
-                        thread = d3.select('#base_posted .thread_id').attr('value')
-                        // CSSTHIS (D we even care?) d3.selectAll('#posts .interject').style('display', 'none');
-                        $nposted.html(d3.select('#template').html())
-                            .attr('class', "post interjection posted")
-                            .attr('id', "")
-                        $nposted.select('.subject').node()
-                            .outerHTML = '<input class="subject" />';
-                        $nposted.select('.content').node()
-                            .outerHTML = '<textarea class="content"></textarea>';
-                        $nposted.select('.thread_id')
-                            .attr('value', thread);
-                        $nposted.select('.owner')
-                            .attr('value', user);
-                        $nposted.select('.signature')
-                            .text(users[user].signature);
-                        $nposted.select('.signature').text(users[user].signature);
-                        $nposted.select('.avatar').attr('src', users[user].avatar);
-                        $nposted.select('.title').text(users[user].title);
-                        $nposted.select('.nick').text(users[user].nick);
-                        $nposted.select('.interject')
-                            // CSSTHIS .style('display', 'initial')
-                            .on('click', function() {
-                            var post = getPost(this.closest('.post'));
-                                post.parent_id = that.closest('.post').querySelector('.id').value;
-                                postPost(post, function() {
-                                    console.log("INTERJECTED");
-                                    loadThread(thread);
-                                });
-                            });
-                        $nposted.datum({});
-                        $nposted.select('.cancel')
-                            //CSSTHIS .style('display', 'initial')
-                            .on('click', function() {
-                                //CSSTHIS d3.selectAll('#posts .post:not(.interjection) .interject').style('display', 'initial');
-                                $nposted.remove();
-                            });
-                        document.getElementById('posts')
-                            .insertBefore($nposted.node(), that.closest('.post').nextSibling)
-                    });
-            };
-            console.log("RENDERING POSTS:", posts);
-            $posts.exit().remove();
-            updatePost($npost);
-            updatePost($posts);
-            $posts.order();
-            //CSSTHIS d3.selectAll('#posts .post:not(.interjection) .interject').style('display', 'initial');
-            // Set up the reply editor
-            d3.select("#base_posted")
-                //CSSTHIS .style('display', 'block')
-            d3.select("#base_posted .owner")
-                .attr('value', user)
-            d3.select('#base_posted .signature').text(users[user].signature);
-            d3.select('#base_posted .avatar').attr('src', users[user].avatar);
-            d3.select('#base_posted .title').text(users[user].title);
-            d3.select('#base_posted .nick').text(users[user].nick);
-            d3.select('#base_posted .reply')
-                .on('click', function() {
-                var posted = this.closest('.post');
-                var post = getPost(posted);
-                postPost(post, function() {
-                    loadThread(post.thread_id);
-                    posted.querySelector('.content').value = '';
-                });
-            });
-        },
-    // I heard cool kids used hash routers
-    // When you navigate to page foo:
-    //   The element with class "page" and an ID that starts with foo are set display:block
-    //   Other elements with class "page" are hidden. (display:none)
-    //   The tab with href "#foo" is set class=active, others have it removed
-    //   The function foo in this map is called with the remaining path elements as arguments and #foo_page as this
-        routes = {
-            'login': function() {
-                var $login_page = d3.select(this);
-                if(user) {
-                    // CSSTHIS $login_page.select('.loggedon').style('display', 'block');
-                    $login_page.select('.user').text(user);
-                } else {
-                    // CSSTHIS $login_page.select('.loggedon').style('display', 'none');
-                    $login_page.select('.user').text("");
-                }
-                $login_page.select('button.logout').on('click', function() {
-                    logout(function() {
-                        d3.selectAll('#posts div.post').remove();
-                        $login_page.select('.user').text("");
-                    });
-                });
-                $login_page.select('button.login').on('click', function() {
-                    var username = $login_page.select('.username').property('value'),
-                        password = $login_page.select('.password').property('value');
-                    console.log('Attempting login as', username, password);
-                    login(username, password, function() {
-                        if(!user) {
-                            alert("WRONG!");
-                            return;
-                        };
-                        $login_page.select('.user').text(user);
-                    });
-                });
-            },
-            'register': function() {
-                var $register_page = d3.select(this);
-                $register_page.select('button.register').on('click', function() {
-                    var username = $register_page.select('input.username').property('value'),
-                        nick = $register_page.select('input.nick').property('value'),
-                        signature = $register_page.select('input.signature').property('value'),
-                        avatar = $register_page.select('input.avatar').property('value'),
-                        password = $register_page.select('input.password').property('value'),
-                        password2 = $register_page.select('input.password2').property('value'),
-                        passcode = $register_page.select('input.passcode').property('value');
-                    if (password != password2) {
-                        alert('Passwords do not match');
-                        return;
-                    }
-                    if (!username.match(/^\w+$/)) {
-                        alert('Username is not a word');
-                        return;
-                    }
-                    registerUser(username, {
-                        'password': password,
-                        'nick': nick,
-                        'signature': signature,
-                        'avatar': avatar,
-                        'passcode': passcode,
-                    }, function() {
-                        alert('Registered ' + username + '. :D');
-                        user = username;
-                        window.location.hash = 'posts/0';
-                    });
-                });
-            },
-            'posts': function(post) {
-                if (post) {
-                    loadThread(post);
-                } else {
-                    window.location.hash = 'posts/0';
-                    return;
-                }
-            },
-            'profile': function(username) {
-                var $profile_page = d3.select(this);
-                if (!username) {
-                    if (!user) {
-                        alert('Login first.');
-                        window.location.hash = 'login';
-                        return;
-                    }
-                    window.location.hash = 'profile/' + user;
-                    return;
-                }
-                console.debug('Loading profile for: ', username);
-                primeUsers([username], function() {
-                    $profile_page.classed('mine', user == username);
-                    // Damnit, HTML, why is there no consistent "the thing I'm displaying" property/attr/css
-                    $profile_page.select('input.username').property('value', username);
-                    $profile_page.select('span.username').text(username);
-                    $profile_page.select('input.nick').property('value', users[username].nick);
-                    $profile_page.select('span.nick').text(users[username].nick);
-                    $profile_page.select('img.avatar').attr('src', users[username].avatar);
-                    $profile_page.select('input.avatar').property("value", users[username].avatar);
-                    $profile_page.select('textarea.signature').property('value', users[username].signature);
-                    $profile_page.select('div.signature').text(users[username].signature);
-                    $profile_page.select('input.password').property('value', "");
-                    $profile_page.select('input.password2').property('value', "");
-
-                    //CSSTHIS $profile_page.selectAll('tr.password').style('display', user == username ? '' : 'none');
-                    //CSSTHIS $profile_page.selectAll('input').style('display', user == username ? 'inline' : 'none');
-                    //CSSTHIS $profile_page.selectAll('textarea').style('display', user == username ? 'inline' : 'none');
-                    //CSSTHIS $profile_page.selectAll('span').style('display', user == username ? 'none' : 'inline');
-                    //CSSTHIS $profile_page.selectAll('div').style('display', user == username ? 'none' : 'inline');
-
-                    $profile_page.select('button.save')
-                    //CSSTHIS .style('display', user == username ? 'inline' : 'none')
-                    .on('click', function() {
-                        var fields = {
-                                'nick': $profile_page.select('input.nick').property('value'),
-                                'avatar': $profile_page.select('input.avatar').property('value'),
-                                'signature': $profile_page.select('textarea.signature').property('value'),
-                                'password': $profile_page.select('input.password').property('value')
-                            };
-
-                        if (fields.password != $profile_page.select('input.password2').property('value')) {
-                            alert("Passwords don't match.");
-                            return;
-                        }
-                        if (!fields.password) { // If there's no password change, pass through the old password fields
-                            delete fields.password;
-                        }
-                        updateUser(user, fields, function() {
-                            delete users[username]; // Users cache will be reprimed when we load the profile
-                            alert("Updated!");
-                            window.location.hash = "profile";
-                        });
-                    });
-                    console.debug("Rendered profile for", username);
-                });
-            },
-            "help": function() {
-                var $help_page = d3.select(this)
-                $help_page.select('button.render')
-                .on('click', function() {
-                    $help_page.select('div.help')
-                        .html("")
-                        .append(function() {
-                            return format($help_page.select('textarea.help').property('value'))
-                        });
-                })
-                .on('click')()
-            }
-        },
-        route = function(hash) {
-            var path_elements = hash.slice(1).split("/"),
-                page = path_elements.shift(),
-                page_elem = d3.select('#' + page + "_page")[0][0];
-            console.debug("Navigating to", page, "(", path_elements, ")");
-            d3.selectAll('body').classed("loading", true);
-            login(null, null, function() {
-                d3.selectAll('body').classed("loading", false);
-                d3.select('body').classed("loggedin", !!user);
-                if (page) {
-                    d3.selectAll('.page')
-                    .classed("active", function(d) { return this.id.startsWith(page); });
-                    d3.selectAll('#topbar a')
-                    .classed("active", function(d) { return this.href.slice(1).split("/")[0] == page; });
-                    routes[page].apply(page_elem, path_elements);
-                } else { // Did you really want to navigate to nowhere?
-                    console.log("hash", hash, "appears to go nowhere");
-                    d3.selectAll('.page').classed("active", false);
-                    //CSSTHIS d3.selectAll('.page').style("display", "none");
-                    d3.selectAll('#topbar a').classed("active", false);
-                }
-            })
-        };
-    window.addEventListener('hashchange', function() {route(window.location.hash)});
-    if(!window.location.hash) {
-        window.location.hash = "help";
-    } else {
-        route(window.location.hash);
-    }
-});
-</script>
 </head>
 <body>
 <div id="topbar">
@@ -1201,8 +1297,11 @@ document.addEventListener("DOMContentLoaded", function() {
 </div>
 <div id="login_page" class="page">
     <p class="loggedon"><span>Currently logged in as: </span><span class="user" /></p>
-    <p><span>Username:</span><input type="text" class="username" /></p>
-    <p><span>Password:</span><input type="password" class="password" /></p>
+    <div class="credentials">
+        <p><span>Username:</span><input type="text" class="username" /></p>
+        <p><span>Password:</span><input type="password" class="password" /></p>
+    </div>
+    <br />
     <button class="login">login</button> <button class="logout">logout</button>
 </div>
 <div id="register_page" class="page">
@@ -1239,18 +1338,18 @@ document.addEventListener("DOMContentLoaded", function() {
             <div class="footer">
                 <div class="signature"></div>
                 <div class="container">
-                    <button class="unload">Unload</button>
+                    <button class="unload">&lt;&lt; Unload</button>
                     <button class="edit">Edit</button>
                     <button class="save">Save</button>
                     <button class="cancel">Cancel</button>
                     <button class="delete">Delete</button>
-                    <button class="load">Load</button>
+                    <button class="load">Load &gt;&gt;</button>
                     <button class="interject">Interject!</button>
                     <button class="reply">Reply</button>
                 </div>
             </div>
         </div>
-        <div class="post replyed" style="display: none" id="base_posted">
+        <div class="post replyed" id="base_posted">
             <div class="header">
                 <div class="miniprofile">
                     <img class="avatar" src="" />
@@ -1306,12 +1405,6 @@ document.addEventListener("DOMContentLoaded", function() {
     <div class="help"></div>
     <br /> <hr />
     <textarea class="help">
-=WELCOME, HUMAN!
-Scroll through this gratuitously large header image to access the website.
-[gamechangerbro.jpg|]
-Alright, feel like you're on a hip website made by attractive millenials with more capital than competence? Good, cause you are.
-==__About this website__
-mindshark.camp is a ~~cheap ass~~ Cali Fran Frisco YCombadrona-Shenzhen-holdings ventures backed ~~website~~ app inspired by ~~an early '80s BBS~~ the hippest social networking trends, reimagined and presented through an interface based on ~~an early '90s star trek series~~ the latest MarTech certified user-oriented demand-driven supply-side access pattern paradigms, built on a solid foundation of ~~early '00s web standards~~ bleeding edge fault-tolerant cloud enterprise content delivery famework distribution network platforms, spiced up with a little bit of of ~~an early '10s visualization library~~ some shit we got from the future, seriously don't worry about it, it's literally magic, we ain't gotta explain shit! Mind blown yet? Yeah, we thought so. Once your mind is unmushed, feel free to move on to actually using the site, or, y'know, don't (it's your loss... you're not a loser, are you?)
 ==__Getting Started__
 Okay cool, you made it. Click "register" on top of this page to become a new user, fill out the forms and DO NOT REUSE A PASSWORD (this site has only marginally better opsec than your grandma with the open wifi and BonziBUDDY). You'll need to know the secret passcode to do so. If you don't have it, you're probably not cool enough to hang out here, maybe try [https://slack.com].
 If you fuck it up don't worry, all that can be changed from profile later. Once you're a user, ~~grab a fresh needle and~~ you will be logged in and escorted to the lobby. From there you may proceed to...

@@ -3,11 +3,11 @@
 
 """
 ==The Backend
-I hate writing backends, but it turns out I hate learning other people's even more.
-By that I mean holy shit couchdb is a steaming pile of bedbug ridden, semen stained,
-cat piss smelling, mold infested, springs-showing, damp garbage from under a bridge.
-Because of this, I am forced to write this thing. In theory it's pretty damn general
-and I hope I won't have to to it again.
+Highly generalized interface from "namespaces" (i.e. maps of HTTP routes/params
+onto SQL queries) to structured results. Originally this was written on couchDB,
+so the namespace somewhat mimicks that. I was hoping to not have to write a backend
+at all and just use that, but it turned out to be too rigid and difficult to debug,
+so here we are, back at what I know. Good old sqlite.
 """
 
 """
